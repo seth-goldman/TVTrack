@@ -80,18 +80,42 @@ returns HTTP 401 if it is ever used from a browser, so a leak into client code
 fails loudly instead of silently exposing every row. `api/_lib.ts` accepts the
 legacy variable names as a fallback.
 
-### 4. Run
+### 4. Auth URLs
+
+Supabase → **Authentication → URL Configuration**:
+
+- **Site URL**: `https://show-track-two.vercel.app` — this is the fallback every
+  invite and magic-link email uses when the requested redirect is not on the
+  allowlist. Leaving it at the default `http://localhost:3000` sends sign-in
+  links to whatever else happens to be running on that port.
+- **Redirect URLs**: add `https://show-track-two.vercel.app/**` and
+  `http://localhost:3000/**`.
+
+### 5. Run
 
 ```powershell
-npm run dev          # Vite dev server on http://localhost:5173
-npm run test         # parser + CSV unit tests
+npx vercel dev       # app + /api routes on http://localhost:3000
+npm run test         # parser, CSV, router and catch-up unit tests
 npm run typecheck
 npm run build
+npm run check-users  # who has an account; flags anything off the allowlist
 ```
 
-The `/api/*` routes are Vercel functions. `npm run dev` serves the frontend
-only; to exercise search, add, or import locally, run `vercel dev` instead
-(it serves both), or deploy a preview.
+Use **`vercel dev`**, not `npm run dev`. The latter is Vite alone on port 5173
+and does not serve `/api/*`, so search, add, catch-up and import all fail
+against it. Note the port difference — `vercel dev` uses **3000**, and will
+pick another port if something else already holds it.
+
+## Deployment
+
+Production: **https://show-track-two.vercel.app** (Vercel project `show-track`).
+
+```powershell
+npx vercel deploy --prod
+```
+
+Environment variables live in the Vercel project for all three environments.
+After changing one, redeploy — `VITE_*` values are baked in at build time.
 
 ## Architecture
 
