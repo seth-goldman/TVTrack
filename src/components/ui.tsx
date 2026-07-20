@@ -119,16 +119,50 @@ export function Sheet({
   title: string
   children: ReactNode
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     if (!open) return
+
+    const opener = document.activeElement as HTMLElement | null
+    const focusables = () =>
+      [
+        ...(panelRef.current?.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ) ?? []),
+      ].filter((el) => !el.hasAttribute('disabled'))
+
+    // Move focus in, and keep Tab inside: a modal the keyboard can walk out of
+    // behind the backdrop is worse than no modal at all.
+    focusables()[0]?.focus()
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab') return
+
+      const items = focusables()
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
     }
+
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = ''
+      opener?.focus?.()
     }
   }, [open, onClose])
 
@@ -143,6 +177,7 @@ export function Sheet({
         aria-hidden
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -153,7 +188,7 @@ export function Sheet({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-2 text-white/60 hover:bg-surface-2"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-white/60 hover:bg-surface-2"
           >
             <X className="h-5 w-5" />
           </button>
@@ -212,10 +247,12 @@ export function ToastStack({
           <span className="min-w-0 flex-1 truncate">{t.message}</span>
           {t.undo ? (
             <button
-              className="shrink-0 font-semibold text-brand-soft"
+              className="min-h-11 shrink-0 px-2 font-semibold text-brand-soft"
               onClick={() => {
-                onDismiss(t.id)
-                void t.undo?.()
+                // Dismiss only once the undo actually lands, so a failure
+                // leaves the button on screen to retry. The undo callback owns
+                // reporting its own error.
+                void Promise.resolve(t.undo?.()).then(() => onDismiss(t.id))
               }}
             >
               Undo

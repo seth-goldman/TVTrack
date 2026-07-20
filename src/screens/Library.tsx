@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Library as LibraryIcon, Plus } from 'lucide-react'
 import {
   getMovies,
@@ -34,20 +34,34 @@ export default function Library({ onOpenShow, onSearch, toast }: Props) {
   const [movies, setMovies] = useState<Movie[] | null>(null)
   const [movieSheet, setMovieSheet] = useState<Movie | null>(null)
 
+  // Switching tabs quickly can leave a slow request in flight; without this
+  // guard its results land after the new tab's and the screen shows the wrong
+  // list.
+  const loadId = useRef(0)
+
   const load = useCallback(async () => {
+    const id = ++loadId.current
     try {
       if (tab === 'movies') {
-        setMovies(await getMovies())
+        const data = await getMovies()
+        if (id === loadId.current) setMovies(data)
       } else {
         // 'watchlist' also surfaces watchlisted movies below the shows, and
         // 'completed' folds in paused/dropped so nothing becomes unreachable.
         const statuses: ShowStatus[] =
           tab === 'completed' ? ['completed', 'paused', 'dropped'] : [tab]
-        setShows(await getShows(statuses))
-        if (tab === 'watchlist') setMovies(await getMovies('watchlist'))
+        const data = await getShows(statuses)
+        if (id === loadId.current) setShows(data)
+
+        if (tab === 'watchlist') {
+          const watchlistMovies = await getMovies('watchlist')
+          if (id === loadId.current) setMovies(watchlistMovies)
+        }
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not load library', 'error')
+      if (id === loadId.current) {
+        toast(err instanceof Error ? err.message : 'Could not load library', 'error')
+      }
     }
   }, [tab, toast])
 
@@ -86,7 +100,11 @@ export default function Library({ onOpenShow, onSearch, toast }: Props) {
     <Screen
       title="Library"
       action={
-        <button onClick={onSearch} aria-label="Add" className="rounded-lg p-2 text-brand-soft">
+        <button
+          onClick={onSearch}
+          aria-label="Add"
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-brand-soft"
+        >
           <Plus className="h-5 w-5" />
         </button>
       }
@@ -96,7 +114,7 @@ export default function Library({ onOpenShow, onSearch, toast }: Props) {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ${
+            className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-medium ${
               tab === t.key ? 'bg-brand text-white' : 'bg-surface-2 text-white/55'
             }`}
           >
@@ -131,7 +149,7 @@ export default function Library({ onOpenShow, onSearch, toast }: Props) {
               {tab === 'watchlist' ? (
                 <button
                   onClick={() => void promote(show)}
-                  className="rounded-lg bg-surface-2 py-1 text-[11px] font-medium text-brand-soft"
+                  className="min-h-11 rounded-lg bg-surface-2 px-2 text-[11px] font-medium text-brand-soft"
                 >
                   Start watching
                 </button>
@@ -186,10 +204,12 @@ export default function Library({ onOpenShow, onSearch, toast }: Props) {
             <RatingPicker
               value={movieSheet.rating}
               onChange={(value) => {
+                const previous = movieSheet.rating
                 setMovieSheet({ ...movieSheet, rating: value })
-                void rateMovie(movieSheet.id, value).catch(() =>
-                  toast('Could not save rating', 'error'),
-                )
+                void rateMovie(movieSheet.id, value).catch(() => {
+                  setMovieSheet((current) => (current ? { ...current, rating: previous } : current))
+                  toast('Could not save rating', 'error')
+                })
               }}
             />
 

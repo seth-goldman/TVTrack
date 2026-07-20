@@ -182,10 +182,12 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
   }
 
   async function onRate(value: number | null) {
+    const previous = rating
     setRating(value)
     try {
       await rateShow(showId, value)
     } catch (err) {
+      setRating(previous)
       toast(err instanceof Error ? err.message : 'Could not save rating', 'error')
     }
   }
@@ -234,7 +236,7 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
         <button
           onClick={onBack}
           aria-label="Back"
-          className="absolute top-[calc(env(safe-area-inset-top)+0.5rem)] left-3 rounded-full bg-black/50 p-2 backdrop-blur"
+          className="absolute top-[calc(env(safe-area-inset-top)+0.5rem)] left-3 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -362,7 +364,7 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
                               onClick={() => void toggleEpisode(e)}
                               aria-label={`${isWatched ? 'Unmark' : 'Mark'} ${episodeCode(e.season, e.episode)} watched`}
                               aria-pressed={isWatched}
-                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition-colors ${
                                 isWatched
                                   ? 'border-good bg-good/20 text-good'
                                   : 'border-hairline text-white/25'

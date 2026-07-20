@@ -14,6 +14,7 @@ export default function Upcoming({ onOpenShow }: { onOpenShow: (showId: number) 
   useEffect(() => {
     let cancelled = false
     setRows(null)
+    setError(null)
     getUpcoming(days)
       .then((data) => {
         if (!cancelled) setRows(data)
@@ -45,7 +46,7 @@ export default function Upcoming({ onOpenShow }: { onOpenShow: (showId: number) 
             <button
               key={d}
               onClick={() => setDays(d)}
-              className={`rounded-lg px-2 py-1 ${
+              className={`flex min-h-11 min-w-11 items-center justify-center rounded-lg px-2 ${
                 days === d ? 'bg-brand text-white' : 'text-white/45'
               }`}
             >
@@ -79,8 +80,11 @@ export default function Upcoming({ onOpenShow }: { onOpenShow: (showId: number) 
               {items.map((row) => (
                 <button
                   key={`${row.kind}-${row.show_id}-${row.season}-${row.episode}`}
-                  onClick={() => (row.kind === 'episode' ? onOpenShow(row.show_id) : undefined)}
-                  className="flex items-center gap-3 rounded-xl border border-hairline bg-surface p-2 text-left"
+                  // Movie releases have no detail screen to open, so they are
+                  // presented as inert rather than as a button that does nothing.
+                  disabled={row.kind !== 'episode'}
+                  onClick={() => onOpenShow(row.show_id)}
+                  className="flex items-center gap-3 rounded-xl border border-hairline bg-surface p-2 text-left disabled:cursor-default"
                 >
                   <Poster path={row.poster_path} alt={row.title} className="h-16 w-11 shrink-0" size="w154" />
                   <div className="min-w-0 flex-1">

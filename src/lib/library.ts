@@ -244,6 +244,20 @@ export async function addMovie(tmdbId: number, status: MovieStatus): Promise<Mov
   const { movie } = await fetchMovie(tmdbId)
   const uid = await userId()
 
+  // Adding a movie that is already in the library must not clobber the date it
+  // was originally watched — that timestamp may have come from a decade-old
+  // TV Time check-in, and losing it is exactly what this app exists to prevent.
+  const existing = await supabase
+    .from('movies')
+    .select('watched_at')
+    .eq('id', tmdbId)
+    .maybeSingle()
+
+  const watchedAt =
+    status === 'watched'
+      ? (existing.data?.watched_at ?? new Date().toISOString())
+      : null
+
   const { data, error } = await supabase
     .from('movies')
     .upsert(
@@ -256,7 +270,7 @@ export async function addMovie(tmdbId: number, status: MovieStatus): Promise<Mov
         release_date: movie.release_date,
         runtime: movie.runtime,
         status,
-        watched_at: status === 'watched' ? new Date().toISOString() : null,
+        watched_at: watchedAt,
       },
       { onConflict: 'user_id,id' },
     )

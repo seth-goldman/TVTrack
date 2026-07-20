@@ -81,7 +81,21 @@ export async function tmdb<T>(path: string, query: Query = {}): Promise<T> {
   }
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(url, { headers: { accept: 'application/json' } })
+    let res: Response
+    try {
+      // Without a timeout a hung TMDB connection burns the whole 60s function
+      // budget, which during an import means losing a page of work.
+      res = await fetch(url, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch (err) {
+      if (attempt === 1) {
+        throw new HttpError(502, `TMDB request failed: ${(err as Error).message}`)
+      }
+      continue
+    }
+
     if (res.ok) return (await res.json()) as T
 
     if (res.status === 404) throw new HttpError(404, 'Not found on TMDB')
@@ -229,7 +243,10 @@ export async function refreshShowCache(showId: number): Promise<{
     }
   }
 
-  await admin().from('show_cache_meta').upsert(
+  // This row is what tells the nightly cron and the importer's warm step that
+  // a show is done. Swallowing a failure here would make both loop forever
+  // re-refreshing the same show.
+  const { error: metaError } = await admin().from('show_cache_meta').upsert(
     {
       show_id: showId,
       refreshed_at: new Date().toISOString(),
@@ -238,6 +255,7 @@ export async function refreshShowCache(showId: number): Promise<{
     },
     { onConflict: 'show_id' },
   )
+  if (metaError) throw new HttpError(500, `Cache meta write failed: ${metaError.message}`)
 
   return { show, episodes: rows.length }
 }

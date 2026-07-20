@@ -266,7 +266,7 @@ export default function Import({ onBack, toast }: Props) {
                   </div>
                   <div className="flex shrink-0 gap-2">
                     <button
-                      className="text-xs text-brand-soft"
+                      className="min-h-11 px-2 text-xs text-brand-soft"
                       onClick={() => {
                         setBatchId(batch.id)
                         loadReview(batch.id)
@@ -280,7 +280,7 @@ export default function Import({ onBack, toast }: Props) {
                       Review
                     </button>
                     <button
-                      className="text-xs text-bad"
+                      className="min-h-11 px-2 text-xs text-bad"
                       onClick={() => {
                         void deleteBatch(batch.id)
                           .then(() => setBatches((b) => b.filter((x) => x.id !== batch.id)))

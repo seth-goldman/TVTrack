@@ -26,6 +26,12 @@ export default function Search({ onOpenShow, toast }: Props) {
 
   // Debounced search: 350ms is long enough that typing a title is one request,
   // short enough to feel live.
+  // Clear immediately on a mode switch — otherwise TV results sit under a
+  // "Movies" header for the length of the debounce.
+  useEffect(() => {
+    setResults(null)
+  }, [mode])
+
   useEffect(() => {
     const q = query.trim()
     if (q.length < 2) {
@@ -76,7 +82,7 @@ export default function Search({ onOpenShow, toast }: Props) {
           <button
             key={m}
             onClick={() => setMode(m)}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+            className={`min-h-11 rounded-full px-4 text-sm font-medium ${
               mode === m ? 'bg-brand text-white' : 'bg-surface-2 text-white/55'
             }`}
           >
@@ -133,7 +139,7 @@ export default function Search({ onOpenShow, toast }: Props) {
               <p className="mt-1 line-clamp-2 text-xs text-white/40">{result.overview}</p>
               <div className="mt-auto flex gap-2 pt-2">
                 <Button
-                  className="flex-1 !min-h-9 !px-2 text-xs"
+                  className="flex-1 !px-2 text-xs"
                   busy={addingId === result.id}
                   onClick={() => void add(result, 'watching')}
                 >
@@ -141,7 +147,7 @@ export default function Search({ onOpenShow, toast }: Props) {
                 </Button>
                 <Button
                   variant="subtle"
-                  className="flex-1 !min-h-9 !px-2 text-xs"
+                  className="flex-1 !px-2 text-xs"
                   busy={addingId === result.id}
                   onClick={() => void add(result, 'watchlist')}
                 >

@@ -33,9 +33,14 @@ export function useRoute(): {
   return { path, navigate, back }
 }
 
-/** `/show/1399` -> 1399; null when the path does not match. */
+/** `/show/1399` -> 1399; null when the path does not match. Only a plain
+ *  positive integer counts — `/show/-1` or `/show/1.5` are not routes, and
+ *  passing their NaN/negative values on to a query is just a wasted request. */
 export function matchId(path: string, prefix: string): number | null {
-  if (!path.startsWith(prefix)) return null
-  const id = Number(path.slice(prefix.length).split('/')[0])
-  return Number.isFinite(id) ? id : null
+  const pathname = path.split(/[?#]/, 1)[0]
+  if (!pathname.startsWith(prefix)) return null
+  const segment = pathname.slice(prefix.length).split('/')[0]
+  if (!/^[1-9]\d*$/.test(segment)) return null
+  const id = Number(segment)
+  return Number.isSafeInteger(id) ? id : null
 }

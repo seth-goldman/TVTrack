@@ -55,6 +55,29 @@ npm run typecheck ; npm run test ; npm run build
 Then run a CodeRabbit review (`coderabbit review --prompt-only`) for anything
 non-trivial, per the global rules.
 
+## Deferred review findings (deliberate, not oversights)
+
+A CodeRabbit pass on the initial build raised these; they were assessed and
+left as-is. Revisit if the reasoning stops holding.
+
+- **CSV export does not prefix `=`/`+`/`-`/`@` cells.** The standard
+  anti-formula-injection prefix mangles legitimate titles and breaks
+  round-tripping the export back into the app. For a single-user archive of
+  your own data, fidelity wins over spreadsheet-macro hardening.
+- **Bulk episode writes are chunked upserts, not a transactional RPC.** They
+  are idempotent (`ignoreDuplicates` on the unique key), so a partial failure
+  is fixed by repeating the action — no torn state to clean up. Worth
+  revisiting only if partial writes turn out to be common.
+- **Staging a batch is not atomic.** A failed upload leaves a partial batch,
+  which the Import screen lists and can delete. Cheaper than an RPC that has to
+  accept an unbounded row payload.
+- **The service worker does not precache hashed build assets.** That needs a
+  build-time manifest step; today the app works offline after one online
+  visit. Fine until offline-on-first-launch is actually wanted.
+- **`Login`/`Settings` import `supabase` directly.** Auth is not part of the
+  library data domain; routing it through `lib/library.ts` would be indirection
+  for its own sake.
+
 ## Known gaps
 
 - The importer has **never run against a real TV Time export** — the file was

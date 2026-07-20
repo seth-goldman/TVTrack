@@ -29,14 +29,13 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     session = data.session
   }
 
-  return fetch(path, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-      ...options.headers,
-    },
-  })
+  // Normalise first, then set Authorization last, so a caller-supplied header
+  // can never replace the bearer token with something else.
+  const headers = new Headers(options.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  headers.set('Authorization', `Bearer ${session.access_token}`)
+
+  return fetch(path, { ...options, headers })
 }
 
 /** apiFetch + JSON parse + error unwrapping, which is what every caller wants. */

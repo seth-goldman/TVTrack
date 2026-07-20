@@ -291,12 +291,27 @@ async function commit(
   const pendingShows = showIds.filter((id) => !existingShows.has(id)).slice(0, COMMIT_PAGE)
   const pendingMovies = movieIds.filter((id) => !existingMovies.has(id)).slice(0, COMMIT_PAGE)
 
+  // A title TMDB refuses to return can never be created, so it must stop
+  // counting as pending -- otherwise `remaining` never reaches zero and the
+  // client loops until its 500-page guard trips. Demoting it to 'unmatched'
+  // also surfaces it in red on the review screen, where it can be re-pointed
+  // by hand. The raw staging rows are untouched either way.
+  const failed: number[] = []
+  async function markUnresolvable(id: number): Promise<void> {
+    failed.push(id)
+    await db
+      .from('import_staging')
+      .update({ match_status: 'unmatched', match_confidence: null })
+      .eq('batch_id', batchId)
+      .eq('resolved_tmdb_id', id)
+  }
+
   // --- create the show / movie rows for this page -------------------------
   for (const id of pendingShows) {
     try {
       const detail = await tmdb<TmdbShowDetail>(`/tv/${id}`)
       const hasCheckIns = rows.some(
-        (r) => r.resolved_tmdb_id === id && r.kind === 'episode',
+        (r) => r.resolved_tmdb_id === id && r.resolved_kind === 'tv' && r.kind === 'episode',
       )
       await db.from('shows').upsert(
         {
@@ -318,6 +333,7 @@ async function commit(
       existingShows.add(id)
     } catch (err) {
       console.warn(`[import] could not create show ${id}`, err)
+      await markUnresolvable(id)
     }
   }
 
@@ -331,8 +347,11 @@ async function commit(
         release_date: string | null
         runtime: number | null
       }>(`/movie/${id}`)
-      const watched = rows.find((r) => r.resolved_tmdb_id === id && r.watched_at !== null)
-      const rated = rows.find((r) => r.resolved_tmdb_id === id && r.rating !== null)
+      const forThisMovie = rows.filter(
+        (r) => r.resolved_tmdb_id === id && r.resolved_kind === 'movie',
+      )
+      const watched = forThisMovie.find((r) => r.watched_at !== null)
+      const rated = forThisMovie.find((r) => r.rating !== null)
       await db.from('movies').upsert(
         {
           id,
@@ -351,6 +370,7 @@ async function commit(
       existingMovies.add(id)
     } catch (err) {
       console.warn(`[import] could not create movie ${id}`, err)
+      await markUnresolvable(id)
     }
   }
 
@@ -386,26 +406,40 @@ async function commit(
     insertedEpisodes += chunk.length
   }
 
-  const ratingRows = rows
-    .filter(
-      (r) =>
-        r.resolved_kind === 'tv' &&
-        r.rating !== null &&
-        r.season === null &&
-        existingShows.has(r.resolved_tmdb_id!),
-    )
-    .map((r) => ({
-      user_id: user.id,
-      show_id: r.resolved_tmdb_id!,
-      rating: r.rating!,
-    }))
+  // Postgres rejects an upsert whose payload hits the same conflict key twice
+  // ("cannot affect row a second time"), and an export can easily carry two
+  // rating rows for one show. Keep the last one seen.
+  const ratingByShow = new Map<number, number>()
+  for (const r of rows) {
+    if (
+      r.resolved_kind === 'tv' &&
+      r.rating !== null &&
+      r.season === null &&
+      existingShows.has(r.resolved_tmdb_id!)
+    ) {
+      ratingByShow.set(r.resolved_tmdb_id!, r.rating)
+    }
+  }
+  const ratingRows = [...ratingByShow].map(([show_id, rating]) => ({
+    user_id: user.id,
+    show_id,
+    rating,
+  }))
 
   if (ratingRows.length > 0) {
-    await db.from('show_ratings').upsert(ratingRows, { onConflict: 'user_id,show_id' })
+    const { error: ratingError } = await db
+      .from('show_ratings')
+      .upsert(ratingRows, { onConflict: 'user_id,show_id' })
+    if (ratingError) throw new HttpError(500, ratingError.message)
   }
 
-  const remainingShows = showIds.filter((id) => !existingShows.has(id)).length
-  const remainingMovies = movieIds.filter((id) => !existingMovies.has(id)).length
+  const failedSet = new Set(failed)
+  const remainingShows = showIds.filter(
+    (id) => !existingShows.has(id) && !failedSet.has(id),
+  ).length
+  const remainingMovies = movieIds.filter(
+    (id) => !existingMovies.has(id) && !failedSet.has(id),
+  ).length
   const done = remainingShows === 0 && remainingMovies === 0
 
   if (done) {
@@ -425,8 +459,9 @@ async function commit(
 
   json(res, 200, {
     done,
-    shows_created: pendingShows.length,
+    shows_created: pendingShows.length - failed.length,
     movies_created: pendingMovies.length,
+    failed: failed.length,
     episodes: insertedEpisodes,
     ratings: ratingRows.length,
     remaining: remainingShows + remainingMovies,
@@ -458,15 +493,30 @@ async function warm(
     .in('show_id', ids.length ? ids : [-1])
   const warmed = new Set((cached ?? []).map((r) => r.show_id as number))
 
-  const todo = ids.filter((id) => !warmed.has(id)).slice(0, 8)
+  const outstanding = ids.filter((id) => !warmed.has(id))
+  const todo = outstanding.slice(0, 8)
+
+  let succeeded = 0
   for (const id of todo) {
     try {
       await refreshShowCache(id)
+      succeeded += 1
     } catch (err) {
       console.warn(`[import] warm failed for show ${id}`, err)
     }
   }
 
-  const remaining = ids.filter((id) => !warmed.has(id)).length - todo.length
-  json(res, 200, { done: remaining <= 0, warmed: todo.length, remaining: Math.max(remaining, 0) })
+  // A show that will not cache leaves no show_cache_meta row, so it stays
+  // outstanding forever. Terminating on a page that made no progress is what
+  // stops the client looping -- caches are a convenience here, and the nightly
+  // cron retries them anyway.
+  const remaining = outstanding.length - succeeded
+  const done = remaining <= 0 || succeeded === 0
+
+  json(res, 200, {
+    done,
+    warmed: succeeded,
+    failed: todo.length - succeeded,
+    remaining: Math.max(remaining, 0),
+  })
 }

@@ -48,13 +48,13 @@ export default function UpNext({ onOpenShow, onSearch, toast }: Props) {
     const { show_id, season, episode, tmdb_episode_id } = row
 
     setPending((p) => new Set(p).add(show_id))
+
+    // The check-in and the refresh are reported separately on purpose. If the
+    // write succeeded but the reload failed, telling the user "check-in
+    // failed" would make them tap again — logging the same episode twice and
+    // hiding a real, saved check-in behind a false error.
     try {
       await markWatched(show_id, [{ season, episode, tmdb_episode_id }])
-      toast(`${row.title} ${episodeCode(season, episode)} watched`, 'ok', async () => {
-        await markUnwatched(show_id, [{ season, episode }])
-        await load()
-      })
-      await load()
     } catch (err) {
       setPending((p) => {
         const next = new Set(p)
@@ -62,7 +62,19 @@ export default function UpNext({ onOpenShow, onSearch, toast }: Props) {
         return next
       })
       toast(err instanceof Error ? err.message : 'Check-in failed', 'error')
+      return
     }
+
+    toast(`${row.title} ${episodeCode(season, episode)} watched`, 'ok', async () => {
+      try {
+        await markUnwatched(show_id, [{ season, episode }])
+        await load()
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Could not undo', 'error')
+      }
+    })
+
+    await load()
   }
 
   async function markSeason(row: UpNextRow) {

@@ -190,6 +190,7 @@ as $$
     left join episode_cache c
       on c.show_id = w.show_id and c.season = w.season and c.episode = w.episode
    where w.user_id = (select auth.uid())
+     and w.season > 0          -- specials are excluded everywhere else too
    group by 1
    order by 1 desc;
 $$;

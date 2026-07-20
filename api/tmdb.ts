@@ -153,9 +153,17 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
     case 'refresh': {
       if (req.method !== 'POST') throw new HttpError(405, 'Use POST')
       const body = (req.body ?? {}) as { show_ids?: unknown }
-      const ids = Array.isArray(body.show_ids)
-        ? body.show_ids.map(Number).filter(Number.isFinite).slice(0, 25)
-        : []
+      // Number() would happily turn true into 1 and null into 0, and an
+      // export with repeats would refresh the same show several times.
+      const ids = [
+        ...new Set(
+          Array.isArray(body.show_ids)
+            ? body.show_ids.filter(
+                (id): id is number => typeof id === 'number' && Number.isSafeInteger(id) && id > 0,
+              )
+            : [],
+        ),
+      ].slice(0, 25)
       if (ids.length === 0) throw new HttpError(400, 'Missing show_ids')
 
       const refreshed: number[] = []

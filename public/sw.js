@@ -29,8 +29,13 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((res) => {
-          const copy = res.clone()
-          caches.open(CACHE).then((c) => c.put('/index.html', copy))
+          // Only cache a real page. Storing a 500 or a captive-portal
+          // interstitial here would make the app permanently unlaunchable
+          // offline until the cache is cleared.
+          if (res.ok) {
+            const copy = res.clone()
+            event.waitUntil(caches.open(CACHE).then((c) => c.put('/index.html', copy)))
+          }
           return res
         })
         .catch(() => caches.match('/index.html').then((r) => r || Response.error())),
@@ -44,8 +49,10 @@ self.addEventListener('fetch', (event) => {
         (hit) =>
           hit ||
           fetch(request).then((res) => {
-            const copy = res.clone()
-            caches.open(CACHE).then((c) => c.put(request, copy))
+            if (res.ok) {
+              const copy = res.clone()
+              event.waitUntil(caches.open(CACHE).then((c) => c.put(request, copy)))
+            }
             return res
           }),
       ),

@@ -29,9 +29,16 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
   for (const row of shows ?? []) unique.set(row.id as number, (row.tmdb_status as string) ?? null)
 
   const ids = [...unique.keys()]
-  const { data: meta } = ids.length
+  // If this lookup fails, every show looks like it has never been refreshed
+  // and the run would re-pull the entire library from TMDB. Bail instead.
+  const { data: meta, error: metaError } = ids.length
     ? await db.from('show_cache_meta').select('show_id, refreshed_at').in('show_id', ids)
-    : { data: [] as { show_id: number; refreshed_at: string }[] }
+    : { data: [] as { show_id: number; refreshed_at: string }[], error: null }
+
+  if (metaError) {
+    json(res, 500, { error: metaError.message })
+    return
+  }
 
   const refreshedAt = new Map<number, number>()
   for (const row of meta ?? []) refreshedAt.set(row.show_id, Date.parse(row.refreshed_at))
