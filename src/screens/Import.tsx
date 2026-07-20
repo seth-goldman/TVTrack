@@ -139,15 +139,20 @@ export default function Import({ onBack, toast }: Props) {
         <button onClick={onBack} aria-label="Back" className="rounded-lg p-3 text-white/70">
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="py-4 text-xl font-semibold tracking-tight">Import from TV Time</h1>
+        <h1 className="py-4 text-xl font-semibold tracking-tight">Import a file</h1>
       </header>
 
       <div className="px-4 pt-4">
         {phase === 'idle' || phase === 'done' ? (
           <>
             <p className="text-sm leading-relaxed text-white/55">
-              Upload the CSV or JSON files from your TV Time GDPR export. Everything is stored raw
+              Upload a watch history export — Trakt, Letterboxd, a TV Time backup, or just a CSV
+              with a <span className="text-white/75">title</span> column. Everything is stored raw
               first, so you can re-run the import later without exporting again.
+            </p>
+            <p className="pt-2 text-xs text-white/35">
+              Trakt exports include TMDB ids, so they match exactly. A plain list of titles is
+              matched by name and may need a few manual picks.
             </p>
 
             <input

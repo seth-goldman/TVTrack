@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, LogOut, Upload } from 'lucide-react'
+import { Download, ListPlus, LogOut, Upload } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { downloadCsvs, downloadJson } from '../lib/export'
 import { getStats } from '../lib/library'
@@ -10,10 +10,11 @@ import { Button, Screen } from '../components/ui'
 interface Props {
   email: string | null
   onImport: () => void
+  onCatchUp: () => void
   toast: (message: string, tone?: 'ok' | 'error') => void
 }
 
-export default function Settings({ email, onImport, toast }: Props) {
+export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
   const [stats, setStats] = useState<MonthStat[] | null>(null)
   const [busy, setBusy] = useState<'json' | 'csv' | null>(null)
 
@@ -82,9 +83,13 @@ export default function Settings({ email, onImport, toast }: Props) {
       <section className="pt-8">
         <h2 className="pb-2 text-xs font-semibold tracking-wide text-white/40 uppercase">Data</h2>
         <div className="flex flex-col gap-2">
+          <Button variant="subtle" onClick={onCatchUp}>
+            <ListPlus className="h-4 w-4" />
+            Set up shows from a list
+          </Button>
           <Button variant="subtle" onClick={onImport}>
             <Upload className="h-4 w-4" />
-            Import from TV Time
+            Import a file
           </Button>
           <Button variant="subtle" busy={busy === 'json'} onClick={() => void exportAs('json')}>
             <Download className="h-4 w-4" />

@@ -1,5 +1,5 @@
 import { apiJson, supabase } from './supabase'
-import { parseExport, type ParseResult, type StagedRow } from './tvtime'
+import { groupKeyFor, parseExport, type ParseResult, type StagedRow } from './tvtime'
 
 // Client half of the importer. Parsing and staging happen here (no reason to
 // ship megabytes of CSV to a serverless function); resolution and commit are
@@ -61,6 +61,7 @@ export async function stageRows(
     kind: row.kind,
     raw: row.raw,
     source_file: row.source_file,
+    tmdb_id: row.tmdb_id,
     tvdb_id: row.tvdb_id,
     imdb_id: row.imdb_id,
     title: row.title,
@@ -117,7 +118,8 @@ export function warmBatch(batchId: string, onStep: (r: StepResult) => void) {
 
 interface RawStagingRow {
   id: number
-  kind: string
+  kind: StagedRow['kind']
+  tmdb_id: number | null
   tvdb_id: number | null
   imdb_id: string | null
   title: string | null
@@ -140,7 +142,7 @@ export async function loadReview(batchId: string): Promise<StagingSummaryRow[]> 
     const { data, error } = await supabase
       .from('import_staging')
       .select(
-        'id, kind, tvdb_id, imdb_id, title, year, season, match_status, match_confidence, match_candidates, resolved_tmdb_id, resolved_kind',
+        'id, kind, tmdb_id, tvdb_id, imdb_id, title, year, season, match_status, match_confidence, match_candidates, resolved_tmdb_id, resolved_kind',
       )
       .eq('batch_id', batchId)
       .range(from, from + pageSize - 1)
@@ -148,17 +150,11 @@ export async function loadReview(batchId: string): Promise<StagingSummaryRow[]> 
 
     const page = (data ?? []) as RawStagingRow[]
     for (const row of page) {
-      if (row.kind === 'unknown') continue
-      const kind: 'tv' | 'movie' = row.kind === 'movie' ? 'movie' : 'tv'
-      const key =
-        row.tvdb_id !== null
-          ? `${kind}:tvdb:${row.tvdb_id}`
-          : row.imdb_id
-            ? `${kind}:imdb:${row.imdb_id}`
-            : row.title
-              ? `${kind}:title:${row.title.toLowerCase()}:${row.year ?? ''}`
-              : null
+      // Same grouping function the server commits with, so the review screen
+      // and the commit can never disagree about what one show is.
+      const key = groupKeyFor(row)
       if (key === null) continue
+      const kind: 'tv' | 'movie' = row.kind === 'movie' ? 'movie' : 'tv'
 
       const existing = groups.get(key)
       if (existing) {

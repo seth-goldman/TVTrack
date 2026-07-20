@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, ChevronRight, MoreHorizontal, Popcorn } from 'lucide-react'
 import {
-  airedEpisodesOfSeason,
-  allAiredEpisodes,
   getCachedEpisodes,
   getUpNext,
   markUnwatched,
   markWatched,
   setShowStatus,
 } from '../lib/library'
+import { airedEpisodesOfSeason, allAiredEpisodes } from '../lib/episodes'
 import type { UpNextRow } from '../lib/types'
 import { episodeCode, formatAirDate, pluralize } from '../lib/format'
 import { stillUrl } from '../lib/tmdb'
@@ -17,10 +16,11 @@ import { Button, EmptyState, Poster, Screen, Sheet, Spinner } from '../component
 interface Props {
   onOpenShow: (showId: number) => void
   onSearch: () => void
+  onCatchUp: () => void
   toast: (message: string, tone?: 'ok' | 'error', undo?: () => void | Promise<void>) => void
 }
 
-export default function UpNext({ onOpenShow, onSearch, toast }: Props) {
+export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props) {
   const [rows, setRows] = useState<UpNextRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Episodes checked off in this render pass. Kept locally so the card
@@ -134,9 +134,16 @@ export default function UpNext({ onOpenShow, onSearch, toast }: Props) {
       {rows.length === 0 ? (
         <EmptyState
           icon={<Popcorn className="h-10 w-10" />}
-          title="Nothing in progress"
-          body="Add a show and it will show up here with its next unwatched episode."
-          action={<Button onClick={onSearch}>Find a show</Button>}
+          title="Let's build your library"
+          body="List the shows you watch and say where you are in each. It takes a couple of minutes and fills this queue."
+          action={
+            <div className="flex flex-col gap-2">
+              <Button onClick={onCatchUp}>Set up my shows</Button>
+              <Button variant="ghost" onClick={onSearch}>
+                Add one at a time
+              </Button>
+            </div>
+          }
         />
       ) : null}
 

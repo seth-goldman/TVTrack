@@ -11,5 +11,7 @@
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "api/**/*.ts"]
+  // src/lib/tvtime.ts is shared: the API imports its grouping helper so the
+  // browser and the server cannot disagree about what one show is.
+  "include": ["vite.config.ts", "vitest.config.ts", "api/**/*.ts", "src/lib/tvtime.ts"]
 }

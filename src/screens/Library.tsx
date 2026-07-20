@@ -25,10 +25,11 @@ const TABS: { key: Tab; label: string }[] = [
 interface Props {
   onOpenShow: (showId: number) => void
   onSearch: () => void
+  onCatchUp: () => void
   toast: (message: string, tone?: 'ok' | 'error') => void
 }
 
-export default function Library({ onOpenShow, onSearch, toast }: Props) {
+export default function Library({ onOpenShow, onSearch, onCatchUp, toast }: Props) {
   const [tab, setTab] = useState<Tab>('watching')
   const [shows, setShows] = useState<Show[] | null>(null)
   const [movies, setMovies] = useState<Movie[] | null>(null)
@@ -133,8 +134,23 @@ export default function Library({ onOpenShow, onSearch, toast }: Props) {
         <EmptyState
           icon={<LibraryIcon className="h-10 w-10" />}
           title="Nothing here yet"
-          body="Search TMDB to add shows and movies to your library."
-          action={<Button onClick={onSearch}>Add something</Button>}
+          body={
+            tab === 'watching'
+              ? 'List everything you watch in one go, or add shows one at a time.'
+              : 'Search TMDB to add shows and movies to your library.'
+          }
+          action={
+            tab === 'watching' ? (
+              <div className="flex flex-col gap-2">
+                <Button onClick={onCatchUp}>Set up my shows</Button>
+                <Button variant="ghost" onClick={onSearch}>
+                  Add one at a time
+                </Button>
+              </div>
+            ) : (
+              <Button onClick={onSearch}>Add something</Button>
+            )
+          }
         />
       ) : null}
 

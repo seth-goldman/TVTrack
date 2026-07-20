@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Check, ChevronDown, RefreshCw } from 'lucide-react'
 import {
-  airedEpisodesOfSeason,
-  airedEpisodesUpTo,
-  allAiredEpisodes,
   getCachedEpisodes,
   getShow,
   getShowRating,
   getWatchedEpisodes,
-  hasAired,
   markUnwatched,
   markWatched,
   rateShow,
   removeShow,
   setShowStatus,
 } from '../lib/library'
+import {
+  airedEpisodesOfSeason,
+  airedEpisodesUpTo,
+  allAiredEpisodes,
+  hasAired,
+} from '../lib/episodes'
 import { fetchShow, posterUrl } from '../lib/tmdb'
 import type { CachedEpisode, Show, ShowStatus } from '../lib/types'
 import { episodeCode, formatAirDate, formatRuntime, pluralize } from '../lib/format'

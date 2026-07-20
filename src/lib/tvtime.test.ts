@@ -3,17 +3,20 @@ import {
   groupForResolution,
   groupKeyFor,
   normaliseHeader,
+  normaliseRatingScale,
   parseCsv,
   parseExport,
   parseExportFile,
-  toRating,
+  toRatingValue,
   toTimestamp,
   toYear,
 } from './tvtime'
 
-// The real GDPR export was not available at build time, so these fixtures
-// cover the shapes reported by third-party importers plus the malformed cases
-// that would silently corrupt history if mishandled.
+// The TV Time GDPR export was never obtained — accounts were deleted on
+// 2026-07-15 — so the parser is exercised against the formats that can
+// realistically turn up instead: Trakt (carries TMDB ids), Letterboxd (movies,
+// five-star ratings), a plain list of titles, and the TV Time shapes reported
+// by third-party importers in case a backup ever surfaces.
 
 describe('parseCsv', () => {
   it('handles quoted fields containing the delimiter', () => {
@@ -80,18 +83,44 @@ describe('toTimestamp', () => {
   })
 })
 
-describe('toRating / toYear', () => {
-  it('keeps 1-10 and rejects out-of-range noise', () => {
-    expect(toRating('8')).toBe(8)
-    expect(toRating('0')).toBeNull()
-    expect(toRating('11')).toBeNull()
-    expect(toRating('')).toBeNull()
+describe('toRatingValue / toYear', () => {
+  it('keeps values valid on either scale, including halves', () => {
+    expect(toRatingValue('8')).toBe(8)
+    expect(toRatingValue('4.5')).toBe(4.5)
+    expect(toRatingValue('0')).toBeNull()
+    expect(toRatingValue('11')).toBeNull()
+    expect(toRatingValue('')).toBeNull()
   })
 
   it('pulls a year out of a full date', () => {
     expect(toYear('2011-04-17')).toBe(2011)
     expect(toYear('2011')).toBe(2011)
     expect(toYear('')).toBeNull()
+  })
+})
+
+describe('normaliseRatingScale', () => {
+  it('doubles a five-star scale when a half-star gives it away', () => {
+    expect(normaliseRatingScale([4.5, 3, 5])).toEqual([9, 6, 10])
+  })
+
+  it('doubles an all-integer file that never exceeds five', () => {
+    expect(normaliseRatingScale([1, 3, 5, 4])).toEqual([2, 6, 10, 8])
+  })
+
+  it('leaves a ten-point scale alone', () => {
+    expect(normaliseRatingScale([7, 9, 10, 3])).toEqual([7, 9, 10, 3])
+  })
+
+  it('does not infer a five-point scale from too few samples', () => {
+    // Two low ratings out of ten look exactly like two mid five-star ratings;
+    // guessing would silently double genuine 10-point values.
+    expect(normaliseRatingScale([4, 5])).toEqual([4, 5])
+  })
+
+  it('passes nulls through and copes with a file that has no ratings', () => {
+    expect(normaliseRatingScale([null, 4.5, null])).toEqual([null, 9, null])
+    expect(normaliseRatingScale([null, null])).toEqual([null, null])
   })
 })
 
@@ -168,6 +197,66 @@ describe('parseExportFile — movies and ratings', () => {
       'tv_show_id,tv_show_name\n121361,Game of Thrones',
     )
     expect(rows[0].kind).toBe('show')
+  })
+})
+
+describe('parseExportFile — Trakt exports', () => {
+  it('reads TMDB ids straight out of a Trakt history CSV', () => {
+    const rows = parseExportFile(
+      'trakt-history.csv',
+      [
+        'watched_at,type,title,year,season,episode,trakt_id,tmdb_id,imdb_id',
+        '2024-02-11T20:15:00.000Z,episode,Severance,2022,1,3,180770,95396,tt11280740',
+      ].join('\n'),
+    )
+    expect(rows[0]).toMatchObject({
+      kind: 'episode',
+      tmdb_id: 95396,
+      imdb_id: 'tt11280740',
+      season: 1,
+      episode: 3,
+      watched_at: '2024-02-11T20:15:00.000Z',
+    })
+  })
+
+  it('groups by TMDB id, which needs no resolution at all', () => {
+    const rows = parseExportFile(
+      'trakt-history.csv',
+      'type,title,season,episode,tmdb_id\nepisode,Severance,1,3,95396',
+    )
+    expect(groupKeyFor(rows[0])).toBe('tv:tmdb:95396')
+  })
+
+  it('prefers a TMDB id over a TVDB id on the same row', () => {
+    const rows = parseExportFile(
+      'history.csv',
+      'title,season,episode,tvdb_id,tmdb_id\nSeverance,1,1,371980,95396',
+    )
+    expect(groupKeyFor(rows[0])).toBe('tv:tmdb:95396')
+  })
+})
+
+describe('parseExportFile — Letterboxd exports', () => {
+  const csv = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2024-03-01,Dune: Part Two,2024,https://boxd.it/abc,4.5',
+    '2024-03-05,Poor Things,2023,https://boxd.it/def,5',
+    '2024-03-09,Argylle,2024,https://boxd.it/ghi,1.5',
+  ].join('\n')
+
+  it('classifies rows as movies and rescales five-star ratings to ten', () => {
+    const rows = parseExportFile('letterboxd-ratings.csv', csv)
+    expect(rows).toHaveLength(3)
+    expect(rows.map((r) => r.rating)).toEqual([9, 10, 3])
+    expect(rows[0]).toMatchObject({ kind: 'movie', title: 'Dune: Part Two', year: 2024 })
+  })
+})
+
+describe('parseExportFile — a plain list of titles', () => {
+  it('reads a single-column CSV of show names', () => {
+    const rows = parseExportFile('shows.csv', 'title\nSeverance\nThe Bear')
+    expect(rows).toHaveLength(2)
+    expect(groupKeyFor(rows[0])).toBe('tv:title:severance:')
   })
 })
 

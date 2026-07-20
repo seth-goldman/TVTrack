@@ -1,10 +1,16 @@
-// Parser for the TV Time GDPR export.
+// Parser for watch-history exports.
 //
-// The export format is not publicly documented and reportedly varies between
-// requests (PRD section 7), so nothing here keys off an exact filename or
-// column name. Instead we normalise headers and match them against ordered
-// alias lists, and we always keep the untouched original row in `raw` so a
-// mis-parse can be corrected by re-running the import rather than re-exporting.
+// Originally written for the TV Time GDPR export, which turned out to be
+// unobtainable — TV Time deleted accounts on 2026-07-15. It is now
+// format-agnostic on purpose, because the plausible sources are all different:
+// Trakt (has TMDB ids, so it round-trips perfectly), Letterboxd (movies, five
+// star ratings), a plain CSV of titles, or a TV Time export if one ever
+// surfaces from a backup.
+//
+// Nothing keys off an exact filename or column name. Headers are normalised
+// and matched against ordered alias lists, content decides CSV vs JSON, and
+// the untouched original row is always kept in `raw` so a mis-parse is fixed
+// by re-running the import rather than by re-exporting.
 
 export type StagingKind = 'episode' | 'show' | 'movie' | 'rating' | 'unknown'
 
@@ -12,6 +18,8 @@ export interface StagedRow {
   kind: StagingKind
   raw: Record<string, string>
   source_file: string
+  /** Present in Trakt exports; when set, resolution is exact and free. */
+  tmdb_id: number | null
   tvdb_id: number | null
   imdb_id: string | null
   title: string | null
@@ -134,8 +142,20 @@ const SERIES_TVDB_ALIASES = [
   'thetvdbid',
 ]
 const EPISODE_TVDB_ALIASES = ['episodetvdbid', 'tvdbepisodeid', 'episodeid']
-const TMDB_ALIASES = ['tmdbid', 'themoviedbid', 'tmdbshowid', 'tmdbmovieid']
-const IMDB_ALIASES = ['imdbid', 'imdb']
+// Trakt writes `tmdb` on shows/movies and `tmdb_episode` on check-ins; the
+// show-level id is the one we want, so it is listed first.
+const TMDB_ALIASES = [
+  'tmdbshowid',
+  'tmdbseriesid',
+  'tmdbmovieid',
+  'showtmdbid',
+  'seriestmdbid',
+  'movietmdbid',
+  'tmdbid',
+  'themoviedbid',
+  'tmdb',
+]
+const IMDB_ALIASES = ['imdbid', 'imdb', 'imdbtt']
 const TITLE_ALIASES = [
   'seriesname',
   'showname',
@@ -160,13 +180,14 @@ const WATCHED_ALIASES = [
   'dateseen',
   'datewatched',
   'seendate',
+  'lastwatchedat',
   'created',
   'createdat',
   'updatedat',
   'timestamp',
   'date',
 ]
-const RATING_ALIASES = ['rating', 'score', 'stars', 'uservote', 'vote']
+const RATING_ALIASES = ['rating', 'score', 'stars', 'uservote', 'vote', 'myrating']
 const YEAR_ALIASES = ['year', 'releaseyear', 'firstaired', 'firstairdate', 'releasedate', 'aired']
 const TYPE_ALIASES = ['type', 'mediatype', 'contenttype', 'kind']
 
@@ -220,14 +241,40 @@ export function toTimestamp(value: string | null): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
 }
 
-export function toRating(value: string | null): number | null {
-  const n = toInt(value)
-  if (n === null) return null
-  // TV Time rated out of 10. Anything outside that range is noise from a
-  // column that merely happens to be named "score"; the raw value survives in
-  // `raw` either way.
-  if (n < 1 || n > 10) return null
+/** The rating exactly as written, before any scale normalisation. Rejects
+ *  values that cannot be a rating on either a 5- or a 10-point scale. */
+export function toRatingValue(value: string | null): number | null {
+  if (value === null) return null
+  const match = value.trim().match(/-?\d+(\.\d+)?/)
+  if (!match) return null
+  const n = Number(match[0])
+  if (!Number.isFinite(n) || n <= 0 || n > 10) return null
   return n
+}
+
+/**
+ * Decide whether a file's ratings are on a 5-point or 10-point scale and
+ * convert everything to the 1-10 the app stores.
+ *
+ * Letterboxd writes halves (`4.5`), Trakt and TV Time write integers out of
+ * ten. A fractional value is therefore unambiguous evidence of a 5-point
+ * scale. Failing that, an all-integer file whose highest rating is 5 or less
+ * is *probably* 5-point — but a 10-point file where nothing was rated above 5
+ * looks identical, so that inference needs a few samples before it fires.
+ */
+export function normaliseRatingScale(values: (number | null)[]): (number | null)[] {
+  const present = values.filter((v): v is number => v !== null)
+  if (present.length === 0) return values
+
+  const hasFraction = present.some((v) => !Number.isInteger(v))
+  const maxValue = Math.max(...present)
+  const fivePoint = hasFraction || (maxValue <= 5 && present.length >= 3)
+
+  return values.map((v) => {
+    if (v === null) return null
+    const scaled = fivePoint ? v * 2 : v
+    return Math.min(10, Math.max(1, Math.round(scaled)))
+  })
 }
 
 // --------------------------------------------------------- classify ---
@@ -243,10 +290,13 @@ function classify(
   const file = fileName.toLowerCase()
   const declaredType = pick(row, TYPE_ALIASES)?.toLowerCase() ?? ''
 
+  // `letterboxd` is a film-only service, so both its filename and its
+  // signature `Letterboxd URI` column are decisive on their own.
   const looksMovie =
     declaredType.includes('movie') ||
-    /movie|film/.test(file) ||
-    Object.keys(row).some((k) => k.includes('movie'))
+    declaredType.includes('film') ||
+    /movie|film|letterboxd/.test(file) ||
+    Object.keys(row).some((k) => k.includes('movie') || k.includes('letterboxd'))
 
   if (season !== null && episode !== null) return 'episode'
   if (looksMovie) return 'movie'
@@ -266,18 +316,20 @@ function rowFromRecord(
   const seriesTvdb = toInt(pick(record, SERIES_TVDB_ALIASES))
   const season = toInt(pick(record, SEASON_ALIASES))
   const episode = toInt(pick(record, EPISODE_NUM_ALIASES))
-  const rating = toRating(pick(record, RATING_ALIASES))
+  // Raw here; the scale is decided per file once every row has been read.
+  const rating = toRatingValue(pick(record, RATING_ALIASES))
   const watchedAt = toTimestamp(pick(record, WATCHED_ALIASES))
   const title = pick(record, TITLE_ALIASES)
-  const tmdbHint = toInt(pick(record, TMDB_ALIASES))
+  const tmdbId = toInt(pick(record, TMDB_ALIASES))
 
   // A row with no identifying information at all is noise (blank line, footer).
-  if (seriesTvdb === null && title === null && tmdbHint === null) return null
+  if (seriesTvdb === null && title === null && tmdbId === null) return null
 
   const kind = classify(fileName, record, season, episode, rating, watchedAt)
 
   return {
     kind,
+    tmdb_id: tmdbId,
     raw: record,
     source_file: fileName,
     tvdb_id: seriesTvdb,
@@ -301,6 +353,8 @@ function recordsFromCsv(text: string, fileName: string): StagedRow[] {
     [
       ...SERIES_TVDB_ALIASES,
       ...EPISODE_TVDB_ALIASES,
+      ...TMDB_ALIASES,
+      ...IMDB_ALIASES,
       ...TITLE_ALIASES,
       ...SEASON_ALIASES,
       ...EPISODE_NUM_ALIASES,
@@ -363,6 +417,17 @@ function flattenJson(value: unknown, fileName: string): StagedRow[] {
 /** Parse one export file. Chooses CSV or JSON by content, not extension —
  *  some exports ship `.txt` files containing JSON. */
 export function parseExportFile(fileName: string, text: string): StagedRow[] {
+  return applyRatingScale(parseRows(fileName, text))
+}
+
+/** Ratings are stored raw during parsing because the 5-vs-10 point decision
+ *  can only be made once the whole file has been seen. */
+function applyRatingScale(rows: StagedRow[]): StagedRow[] {
+  const scaled = normaliseRatingScale(rows.map((r) => r.rating))
+  return rows.map((row, i) => (row.rating === scaled[i] ? row : { ...row, rating: scaled[i] }))
+}
+
+function parseRows(fileName: string, text: string): StagedRow[] {
   const trimmed = text.trim()
   if (trimmed === '') return []
 
@@ -399,12 +464,43 @@ export function parseExport(files: { name: string; text: string }[]): ParseResul
 export interface TitleGroup {
   key: string
   kind: 'tv' | 'movie'
+  tmdb_id: number | null
   tvdb_id: number | null
   imdb_id: string | null
   title: string | null
   year: number | null
   rowCount: number
   episodeCount: number
+}
+
+/** The minimum a row needs to be grouped. Deliberately structural so the same
+ *  function works on a freshly parsed `StagedRow` and on a row read back out
+ *  of `import_staging` — the browser, the review screen and the server must
+ *  agree on what counts as "one show", or the commit writes to a group the
+ *  user never reviewed. */
+export interface GroupIdentity {
+  kind: StagingKind
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  title?: string | null
+  year?: number | null
+}
+
+/**
+ * The stable identity of the work a row refers to, most trustworthy id first.
+ * A TMDB id needs no resolution at all, which is why a Trakt export imports
+ * perfectly and a bare list of titles does not.
+ */
+export function groupKeyFor(row: GroupIdentity): string | null {
+  if (row.kind === 'unknown') return null
+  const kind: 'tv' | 'movie' = row.kind === 'movie' ? 'movie' : 'tv'
+
+  if (row.tmdb_id != null) return `${kind}:tmdb:${row.tmdb_id}`
+  if (row.tvdb_id != null) return `${kind}:tvdb:${row.tvdb_id}`
+  if (row.imdb_id) return `${kind}:imdb:${row.imdb_id}`
+  if (row.title) return `${kind}:title:${row.title.toLowerCase()}:${row.year ?? ''}`
+  return null
 }
 
 /**
@@ -416,16 +512,7 @@ export function groupForResolution(rows: StagedRow[]): TitleGroup[] {
   const groups = new Map<string, TitleGroup>()
 
   for (const row of rows) {
-    if (row.kind === 'unknown') continue
-    const kind: 'tv' | 'movie' = row.kind === 'movie' ? 'movie' : 'tv'
-    const key =
-      row.tvdb_id !== null
-        ? `${kind}:tvdb:${row.tvdb_id}`
-        : row.imdb_id
-          ? `${kind}:imdb:${row.imdb_id}`
-          : row.title
-            ? `${kind}:title:${row.title.toLowerCase()}:${row.year ?? ''}`
-            : null
+    const key = groupKeyFor(row)
     if (key === null) continue
 
     const existing = groups.get(key)
@@ -436,10 +523,13 @@ export function groupForResolution(rows: StagedRow[]): TitleGroup[] {
       existing.title ??= row.title
       existing.year ??= row.year
       existing.imdb_id ??= row.imdb_id
+      existing.tmdb_id ??= row.tmdb_id
+      existing.tvdb_id ??= row.tvdb_id
     } else {
       groups.set(key, {
         key,
-        kind,
+        kind: row.kind === 'movie' ? 'movie' : 'tv',
+        tmdb_id: row.tmdb_id,
         tvdb_id: row.tvdb_id,
         imdb_id: row.imdb_id,
         title: row.title,
@@ -451,14 +541,4 @@ export function groupForResolution(rows: StagedRow[]): TitleGroup[] {
   }
 
   return [...groups.values()].sort((a, b) => b.episodeCount - a.episodeCount)
-}
-
-/** The staging key a row belongs to; must mirror `groupForResolution`. */
-export function groupKeyFor(row: StagedRow): string | null {
-  if (row.kind === 'unknown') return null
-  const kind: 'tv' | 'movie' = row.kind === 'movie' ? 'movie' : 'tv'
-  if (row.tvdb_id !== null) return `${kind}:tvdb:${row.tvdb_id}`
-  if (row.imdb_id) return `${kind}:imdb:${row.imdb_id}`
-  if (row.title) return `${kind}:title:${row.title.toLowerCase()}:${row.year ?? ''}`
-  return null
 }

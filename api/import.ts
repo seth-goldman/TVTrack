@@ -12,6 +12,7 @@ import {
   tmdb,
   type TmdbShowDetail,
 } from './_lib.js'
+import { groupKeyFor } from '../src/lib/tvtime.js'
 
 // Server half of the TV Time importer (PRD section 7). The client parses the
 // export and writes raw rows to import_staging; this endpoint does the two
@@ -25,6 +26,7 @@ import {
 interface StagingRow {
   id: number
   kind: 'episode' | 'show' | 'movie' | 'rating' | 'unknown'
+  tmdb_id: number | null
   tvdb_id: number | null
   imdb_id: string | null
   title: string | null
@@ -74,16 +76,6 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
 
 // ------------------------------------------------------------ resolve ---
 
-/** Everything that identifies one work, and the staging rows that mention it. */
-function groupKey(row: StagingRow): string | null {
-  if (row.kind === 'unknown') return null
-  const kind = row.kind === 'movie' ? 'movie' : 'tv'
-  if (row.tvdb_id !== null) return `${kind}:tvdb:${row.tvdb_id}`
-  if (row.imdb_id) return `${kind}:imdb:${row.imdb_id}`
-  if (row.title) return `${kind}:title:${row.title.toLowerCase()}:${row.year ?? ''}`
-  return null
-}
-
 function normaliseTitle(title: string): string {
   return title
     .toLowerCase()
@@ -100,7 +92,7 @@ async function resolve(
   const { data, error } = await db
     .from('import_staging')
     .select(
-      'id, kind, tvdb_id, imdb_id, title, year, season, episode, watched_at, rating, resolved_tmdb_id, resolved_kind, match_status',
+      'id, kind, tmdb_id, tvdb_id, imdb_id, title, year, season, episode, watched_at, rating, resolved_tmdb_id, resolved_kind, match_status',
     )
     .eq('batch_id', batchId)
     .eq('match_status', 'pending')
@@ -116,14 +108,23 @@ async function resolve(
   // one per check-in.
   const groups = new Map<string, StagingRow[]>()
   for (const row of rows) {
-    const key = groupKey(row)
+    // Shared with the browser and the review screen on purpose: if the three
+    // disagreed on what "one show" is, the commit would write to a group the
+    // user never saw.
+    const key = groupKeyFor(row)
     if (key === null) continue
     const list = groups.get(key) ?? []
     list.push(row)
     groups.set(key, list)
   }
 
-  const page = [...groups.entries()].slice(0, RESOLVE_PAGE)
+  // Groups that already carry a TMDB id need no network call, so they are not
+  // charged against the page budget -- a Trakt import of 400 shows resolves in
+  // one request instead of sixteen.
+  const entries = [...groups.entries()]
+  const free = entries.filter(([, members]) => members[0].tmdb_id != null)
+  const paid = entries.filter(([, members]) => members[0].tmdb_id == null).slice(0, RESOLVE_PAGE)
+  const page = [...free, ...paid]
   let resolvedCount = 0
 
   for (const [key, members] of page) {
@@ -178,7 +179,12 @@ async function resolveOne(
   confidence: 'exact' | 'high' | 'low' | null
   candidates: unknown[] | null
 }> {
-  // 1. External id -- the only path that is unambiguous by construction.
+  // 0. Already a TMDB id (Trakt exports). Nothing to resolve, no API call.
+  if (row.tmdb_id != null) {
+    return { status: 'matched', tmdbId: row.tmdb_id, confidence: 'exact', candidates: null }
+  }
+
+  // 1. Another service's id -- still unambiguous, but costs a lookup.
   for (const [value, source] of [
     [row.tvdb_id !== null ? String(row.tvdb_id) : null, 'tvdb_id'],
     [row.imdb_id, 'imdb_id'],
@@ -263,7 +269,7 @@ async function commit(
   const { data, error } = await db
     .from('import_staging')
     .select(
-      'id, kind, tvdb_id, imdb_id, title, year, season, episode, watched_at, rating, resolved_tmdb_id, resolved_kind, match_status',
+      'id, kind, tmdb_id, tvdb_id, imdb_id, title, year, season, episode, watched_at, rating, resolved_tmdb_id, resolved_kind, match_status',
     )
     .eq('batch_id', batchId)
     .eq('match_status', 'matched')

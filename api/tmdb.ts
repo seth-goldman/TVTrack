@@ -25,6 +25,7 @@ interface TmdbSearchTv {
     poster_path: string | null
     first_air_date: string | null
     vote_average: number
+    popularity?: number
   }[]
 }
 
@@ -36,6 +37,7 @@ interface TmdbSearchMovie {
     poster_path: string | null
     release_date: string | null
     vote_average: number
+    popularity?: number
   }[]
 }
 
@@ -149,6 +151,45 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
       return
     }
 
+    // Resolve a pasted list of titles in one round trip. This is the onboarding
+    // path: with no TV Time export to import, the library is rebuilt by typing
+    // show names, and one request per title would be both slow and rude to
+    // TMDB.
+    case 'resolve-titles': {
+      if (req.method !== 'POST') throw new HttpError(405, 'Use POST')
+      const body = (req.body ?? {}) as { titles?: unknown; kind?: unknown }
+      const kind = body.kind === 'movie' ? 'movie' : 'tv'
+
+      const titles = Array.isArray(body.titles)
+        ? body.titles
+            .filter((t): t is string => typeof t === 'string')
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0)
+            .slice(0, 100)
+        : []
+      if (titles.length === 0) throw new HttpError(400, 'Missing titles')
+
+      const resolved = []
+      for (const raw of titles) {
+        // "Severance (2022)" — a year in parentheses is a disambiguator, not
+        // part of the title.
+        const yearMatch = raw.match(/\((\d{4})\)\s*$/)
+        const year = yearMatch ? Number(yearMatch[1]) : null
+        const title = yearMatch ? raw.slice(0, yearMatch.index).trim() : raw
+
+        try {
+          const candidates = await searchCandidates(kind, title, year)
+          resolved.push({ input: raw, title, year, kind, candidates })
+        } catch (error) {
+          console.warn(`[tmdb] title resolve failed for "${raw}"`, error)
+          resolved.push({ input: raw, title, year, kind, candidates: [] })
+        }
+      }
+
+      json(res, 200, { resolved })
+      return
+    }
+
     // Refresh cache for a batch of shows the client knows are stale.
     case 'refresh': {
       if (req.method !== 'POST') throw new HttpError(405, 'Use POST')
@@ -202,6 +243,76 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
       throw new HttpError(400, `Unknown action: ${action ?? '(none)'}`)
   }
 })
+
+export interface TitleCandidate {
+  id: number
+  title: string
+  overview: string | null
+  poster_path: string | null
+  year: number | null
+  vote_average: number
+  popularity: number
+}
+
+/**
+ * Candidates for one typed title, best guess first. TMDB's own relevance
+ * ranking is used as-is except that an exact title match is promoted: someone
+ * typing "The Office" means the show called The Office, not a documentary that
+ * merely mentions it.
+ */
+async function searchCandidates(
+  kind: 'tv' | 'movie',
+  title: string,
+  year: number | null,
+): Promise<TitleCandidate[]> {
+  const query = { query: title, include_adult: false } as Record<string, string | number | boolean>
+  if (year !== null) query[kind === 'tv' ? 'first_air_date_year' : 'year'] = year
+
+  const raw =
+    kind === 'tv'
+      ? (await tmdb<TmdbSearchTv>('/search/tv', query)).results.map((r) => ({
+          id: r.id,
+          title: r.name,
+          overview: r.overview,
+          poster_path: r.poster_path,
+          year: r.first_air_date ? Number(r.first_air_date.slice(0, 4)) : null,
+          vote_average: r.vote_average,
+          popularity: r.popularity ?? 0,
+        }))
+      : (await tmdb<TmdbSearchMovie>('/search/movie', query)).results.map((r) => ({
+          id: r.id,
+          title: r.title,
+          overview: r.overview,
+          poster_path: r.poster_path,
+          year: r.release_date ? Number(r.release_date.slice(0, 4)) : null,
+          vote_average: r.vote_average,
+          popularity: r.popularity ?? 0,
+        }))
+
+  const wanted = normaliseForMatch(title)
+  const scored = raw.map((c, index) => ({
+    candidate: c,
+    exact: normaliseForMatch(c.title) === wanted,
+    rightYear: year !== null && c.year === year,
+    index,
+  }))
+
+  scored.sort((a, b) => {
+    if (a.exact !== b.exact) return a.exact ? -1 : 1
+    if (a.rightYear !== b.rightYear) return a.rightYear ? -1 : 1
+    return a.index - b.index
+  })
+
+  return scored.slice(0, 6).map((s) => s.candidate)
+}
+
+function normaliseForMatch(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\(\d{4}\)/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
 
 function showPayload(show: TmdbShowDetail) {
   return {

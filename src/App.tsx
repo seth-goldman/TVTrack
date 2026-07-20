@@ -12,6 +12,7 @@ import Search from './screens/Search'
 import Settings from './screens/Settings'
 import ShowDetail from './screens/ShowDetail'
 import Import from './screens/Import'
+import CatchUp from './screens/CatchUp'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -46,23 +47,40 @@ export default function App() {
         <ShowDetail showId={showId} onBack={back} toast={toast} />
       ) : path === '/import' ? (
         <Import onBack={() => navigate('/settings')} toast={toast} />
+      ) : path === '/catch-up' ? (
+        <CatchUp
+          onBack={back}
+          onFinish={() => navigate('/', { replace: true })}
+          toast={toast}
+        />
       ) : path === '/upcoming' ? (
         <Upcoming onOpenShow={openShow} />
       ) : path === '/library' ? (
-        <Library onOpenShow={openShow} onSearch={() => navigate('/search')} toast={toast} />
+        <Library
+          onOpenShow={openShow}
+          onSearch={() => navigate('/search')}
+          onCatchUp={() => navigate('/catch-up')}
+          toast={toast}
+        />
       ) : path === '/search' ? (
         <Search onOpenShow={openShow} toast={toast} />
       ) : path === '/settings' ? (
         <Settings
           email={session.user.email ?? null}
           onImport={() => navigate('/import')}
+          onCatchUp={() => navigate('/catch-up')}
           toast={toast}
         />
       ) : (
-        <UpNext onOpenShow={openShow} onSearch={() => navigate('/search')} toast={toast} />
+        <UpNext
+          onOpenShow={openShow}
+          onSearch={() => navigate('/search')}
+          onCatchUp={() => navigate('/catch-up')}
+          toast={toast}
+        />
       )}
 
-      {showId === null && path !== '/import' ? (
+      {showId === null && path !== '/import' && path !== '/catch-up' ? (
         <BottomNav path={path} onNavigate={navigate} />
       ) : null}
 

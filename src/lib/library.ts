@@ -1,5 +1,11 @@
-import { supabase } from './supabase'
+import { apiJson, supabase } from './supabase'
 import { fetchMovie, fetchShow } from './tmdb'
+import {
+  airedEpisodesUpTo,
+  allAiredEpisodes,
+  type EpisodeRef,
+} from './episodes'
+import type { Progress, ResolvedTitle } from './catchup'
 import type {
   CachedEpisode,
   MonthStat,
@@ -154,13 +160,6 @@ export async function rateShow(showId: number, rating: number | null): Promise<v
   if (error) throw new Error(error.message)
 }
 
-export interface EpisodeRef {
-  season: number
-  episode: number
-  tmdb_episode_id?: number | null
-  watched_at?: string
-}
-
 /**
  * Mark episodes watched. `ignoreDuplicates` means re-checking an episode you
  * already logged is a no-op rather than an error, and — critically for the
@@ -201,41 +200,6 @@ export async function markUnwatched(showId: number, episodes: EpisodeRef[]): Pro
       .eq('episode', e.episode)
     if (error) throw new Error(error.message)
   }
-}
-
-/** Every aired episode of a season. */
-export function airedEpisodesOfSeason(episodes: CachedEpisode[], season: number): EpisodeRef[] {
-  return episodes.filter((e) => e.season === season && hasAired(e)).map(toRef)
-}
-
-/** Every aired episode up to and including the given one — the "I started
- *  mid-season" catch-up action. */
-export function airedEpisodesUpTo(
-  episodes: CachedEpisode[],
-  season: number,
-  episode: number,
-): EpisodeRef[] {
-  return episodes
-    .filter((e) => hasAired(e) && (e.season < season || (e.season === season && e.episode <= episode)))
-    .map(toRef)
-}
-
-export function allAiredEpisodes(episodes: CachedEpisode[]): EpisodeRef[] {
-  return episodes.filter(hasAired).map(toRef)
-}
-
-export function hasAired(e: CachedEpisode): boolean {
-  return e.air_date !== null && e.air_date <= todayIso()
-}
-
-function toRef(e: CachedEpisode): EpisodeRef {
-  return { season: e.season, episode: e.episode, tmdb_episode_id: e.tmdb_episode_id }
-}
-
-export function todayIso(): string {
-  const now = new Date()
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 10)
 }
 
 // ------------------------------------------------------------- movies ---
@@ -303,4 +267,54 @@ export async function rateMovie(movieId: number, rating: number | null): Promise
 export async function removeMovie(movieId: number): Promise<void> {
   const { error } = await supabase.from('movies').delete().eq('id', movieId)
   if (error) throw new Error(error.message)
+}
+
+// ------------------------------------------------------- bulk catch-up ---
+
+/** Resolve a whole pasted list of titles in one request. */
+export function resolveTitles(
+  titles: string[],
+  kind: 'tv' | 'movie',
+): Promise<{ resolved: ResolvedTitle[] }> {
+  return apiJson('/api/tmdb?action=resolve-titles', {
+    method: 'POST',
+    body: JSON.stringify({ titles, kind }),
+  })
+}
+
+/**
+ * Add one confirmed show and return its episodes. `addShow` warms
+ * episode_cache through the proxy on the way, so by the time this resolves the
+ * progress picker has real seasons to offer.
+ */
+export async function addAndLoadEpisodes(tmdbId: number): Promise<CachedEpisode[]> {
+  await addShow(tmdbId, 'watching')
+  return getCachedEpisodes(tmdbId)
+}
+
+/** Turn a progress choice into the episodes it implies. */
+export function episodesForProgress(
+  episodes: CachedEpisode[],
+  progress: Progress,
+): EpisodeRef[] {
+  if (progress.type === 'not_started') return []
+  if (progress.type === 'caught_up') return allAiredEpisodes(episodes)
+  return airedEpisodesUpTo(episodes, progress.season, progress.episode)
+}
+
+/** Write one show's progress. A show the user has not started belongs on the
+ *  watchlist, not at the head of Up Next on S01E01. */
+export async function applyProgress(
+  showId: number,
+  episodes: CachedEpisode[],
+  progress: Progress,
+): Promise<void> {
+  if (progress.type === 'not_started') {
+    await setShowStatus(showId, 'watchlist')
+    return
+  }
+
+  const refs = episodesForProgress(episodes, progress)
+  if (refs.length > 0) await markWatched(showId, refs)
+  await setShowStatus(showId, 'watching')
 }

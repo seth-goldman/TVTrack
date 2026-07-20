@@ -18,6 +18,8 @@ that needs the TMDB key, TMDB for metadata.
 2. **Never lose watch history.** `import_staging` holds raw export rows
    untouched; commits are idempotent upserts that preserve the original
    `watched_at`. A re-run must never overwrite a real timestamp with `now()`.
+   This rule is why the app exists — a decade of TV Time history was already
+   lost once (see Known gaps).
 3. **RLS on every user-owned table**, keyed `user_id = auth.uid()`. A second
    household account must need no schema change.
 4. **Check-in speed is the product.** App open → episode marked in one tap.
@@ -29,9 +31,14 @@ that needs the TMDB key, TMDB for metadata.
 - `src/lib/` holds all logic; `src/screens/` holds one file per screen;
   `src/components/` holds shared primitives. Screens do not talk to Supabase
   directly — they call `lib/library.ts`.
-- Pure logic modules (`tvtime.ts`, `csv.ts`, `format.ts`) must not import
-  `supabase.ts`, which throws at module load without env vars and would break
-  their unit tests.
+- Pure logic modules (`tvtime.ts`, `csv.ts`, `format.ts`, `episodes.ts`,
+  `catchup.ts`) must not import `supabase.ts`, which throws at module load
+  without env vars and would break their unit tests. When a feature needs both,
+  the pure half goes in its own module and the writes go in `library.ts`.
+- `src/lib/tvtime.ts` is imported by `api/import.ts` as well as the browser —
+  `groupKeyFor` must stay identical on both sides or the commit writes to
+  groups the user never reviewed. It is listed in `tsconfig.node.json` for
+  this reason.
 - Tests are `src/**/*.test.ts`, run on the `node` environment. The parser is
   the piece most worth testing — it is the one thing that can silently corrupt
   a decade of history.
@@ -80,8 +87,12 @@ left as-is. Revisit if the reasoning stops holding.
 
 ## Known gaps
 
-- The importer has **never run against a real TV Time export** — the file was
-  not available at build time. Treat the real file as the spec: add it as a
-  test fixture, extend the alias lists in `src/lib/tvtime.ts`, re-run tests.
+- **There is no TV Time export and there never will be.** The GDPR export was
+  not run before the 2026-07-15 deletion deadline. The PRD's F7 assumes that
+  file exists — it does not. Onboarding is `src/screens/CatchUp.tsx` instead.
+  Do not write work plans that depend on the export arriving.
+- The importer is generalised but has **never run against a real export file**.
+  Treat any real file as the spec: add it as a fixture, extend the alias lists
+  in `src/lib/tvtime.ts`, re-run tests.
 - No push notifications (PRD defers to v1.1 email digest via Resend).
 - No household/second-user UI yet; the schema already supports it.
