@@ -12,9 +12,13 @@ that needs the TMDB key, TMDB for metadata.
 
 ## Non-negotiables
 
-1. **The TMDB API key and the Supabase service-role key never reach the
-   client.** Anything needing them goes in `api/`. Client code calls
-   `/api/tmdb` or `/api/import` through `apiFetch`, never TMDB directly.
+1. **The TMDB API key and the Supabase secret key never reach the client.**
+   Anything needing them goes in `api/`. Client code calls `/api/tmdb` or
+   `/api/import` through `apiFetch`, never TMDB directly. The secret key
+   (`sb_secret_…`, formerly `service_role`) bypasses RLS entirely — it is used
+   for exactly one thing here: writing the shared `episode_cache` /
+   `show_cache_meta` catalogue tables. Never use it for user-owned rows; use
+   `asUser(token)` so RLS still applies.
 2. **Never lose watch history.** `import_staging` holds raw export rows
    untouched; commits are idempotent upserts that preserve the original
    `watched_at`. A re-run must never overwrite a real timestamp with `now()`.

@@ -11,13 +11,35 @@ export function env(name: string): string {
   return value
 }
 
+/** First of several accepted names. Supabase renamed its key pair — `anon` ->
+ *  publishable, `service_role` -> secret — and both generations work until the
+ *  legacy keys stop being issued at the end of 2026. Accepting either name
+ *  means the deploy does not break on whichever one is configured. */
+function envAny(names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]
+    if (value) return value
+  }
+  throw new Error(`Missing required environment variable: one of ${names.join(', ')}`)
+}
+
+/** Full-access key. Bypasses RLS — server only, never bundled into the client. */
+export function secretKey(): string {
+  return envAny(['SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_ROLE_KEY'])
+}
+
+/** Public key. Ships in the browser bundle by design; RLS is what protects data. */
+export function publishableKey(): string {
+  return envAny(['SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY'])
+}
+
 let adminClient: SupabaseClient | null = null
 
-/** Service-role client. Bypasses RLS -- only ever used to write catalogue
+/** Full-access client. Bypasses RLS -- only ever used to write catalogue
  *  tables (episode_cache, show_cache_meta), never user-owned rows. */
 export function admin(): SupabaseClient {
   if (!adminClient) {
-    adminClient = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), {
+    adminClient = createClient(env('SUPABASE_URL'), secretKey(), {
       auth: { persistSession: false, autoRefreshToken: false },
     })
   }
@@ -28,7 +50,7 @@ export function admin(): SupabaseClient {
  *  write. Use this for anything touching user-owned rows; `admin()` is only
  *  for the shared catalogue tables. */
 export function asUser(token: string): SupabaseClient {
-  return createClient(env('SUPABASE_URL'), env('SUPABASE_ANON_KEY'), {
+  return createClient(env('SUPABASE_URL'), publishableKey(), {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   })

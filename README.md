@@ -70,8 +70,15 @@ Authentication → URL Configuration → Redirect URLs.
 
 `VITE_*` values go in `.env.local` for local dev and into Vercel's environment
 variables for deploys. The server-only values (`TMDB_API_KEY`,
-`SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`) go **only** into Vercel — they are
-never bundled into the client. See `.env.example`.
+`SUPABASE_SECRET_KEY`, `CRON_SECRET`) go **only** into Vercel — they are never
+bundled into the client. See `.env.example`.
+
+Supabase renamed its key pair: `anon` → **publishable** (`sb_publishable_…`)
+and `service_role` → **secret** (`sb_secret_…`). Use the new keys, from
+Dashboard → Settings → API Keys. They rotate independently, and a secret key
+returns HTTP 401 if it is ever used from a browser, so a leak into client code
+fails loudly instead of silently exposing every row. `api/_lib.ts` accepts the
+legacy variable names as a fallback.
 
 ### 4. Run
 
