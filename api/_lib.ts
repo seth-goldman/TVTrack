@@ -71,16 +71,37 @@ export class HttpError extends Error {
   }
 }
 
-/** Resolve the caller from their Supabase JWT. Every endpoint requires this;
- *  the proxy is not an open TMDB relay. */
-export async function requireUser(req: VercelRequest): Promise<{ id: string }> {
+/**
+ * Resolve the caller from their Supabase JWT. Every endpoint requires this;
+ * the proxy is not an open TMDB relay.
+ *
+ * A valid Supabase account is necessary but not sufficient. RLS already stops
+ * one user reading another's rows, but it says nothing about who may spend the
+ * TMDB quota or write the shared episode_cache — so while public signup is
+ * enabled, ALLOWED_USER_EMAILS is what keeps a stranger who registers from
+ * using the proxy. Unset means allow everyone, which is only safe when signup
+ * is disabled in the Supabase dashboard.
+ */
+export async function requireUser(req: VercelRequest): Promise<{ id: string; email: string | null }> {
   const header = req.headers.authorization
   const token = header?.startsWith('Bearer ') ? header.slice(7) : null
   if (!token) throw new HttpError(401, 'Not authenticated')
 
   const { data, error } = await admin().auth.getUser(token)
   if (error || !data.user) throw new HttpError(401, 'Not authenticated')
-  return { id: data.user.id }
+
+  const email = data.user.email ?? null
+  const allowList = (process.env.ALLOWED_USER_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0)
+
+  if (allowList.length > 0 && (!email || !allowList.includes(email.toLowerCase()))) {
+    console.warn(`[auth] rejected non-allowlisted user ${data.user.id}`)
+    throw new HttpError(403, 'This account is not authorised to use this app')
+  }
+
+  return { id: data.user.id, email }
 }
 
 /** Vercel cron calls arrive with `Authorization: Bearer $CRON_SECRET`. */

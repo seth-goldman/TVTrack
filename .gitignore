@@ -7,3 +7,5 @@ dist
 !.env.example
 .DS_Store
 data/tvtime-export/
+
+.vercel

@@ -10,7 +10,8 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "check-users": "node --env-file=.env.local scripts/check-users.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
