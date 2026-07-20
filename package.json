@@ -1,0 +1,35 @@
+{
+  "name": "showtrack",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.0",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.545.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/node": "^22.18.8",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vercel/node": "^5.3.24",
+    "@vitejs/plugin-react": "^5.0.4",
+    "sharp": "^0.35.3",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9",
+    "vitest": "^3.2.4"
+  }
+}
