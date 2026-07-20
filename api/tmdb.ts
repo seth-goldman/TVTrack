@@ -169,8 +169,13 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
         : []
       if (titles.length === 0) throw new HttpError(400, 'Missing titles')
 
-      const resolved = []
-      for (const raw of titles) {
+      // Resolved in bounded-concurrency chunks. Strictly sequential, a pasted
+      // list of 50 shows is 50 round trips end to end, which is close enough
+      // to the function's duration limit to lose the whole batch; unbounded
+      // would burst 100 requests at TMDB at once. Six at a time is neither.
+      const CONCURRENCY = 6
+
+      const resolveOneTitle = async (raw: string) => {
         // "Severance (2022)" — a year in parentheses is a disambiguator, not
         // part of the title.
         const yearMatch = raw.match(/\((\d{4})\)\s*$/)
@@ -178,12 +183,18 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
         const title = yearMatch ? raw.slice(0, yearMatch.index).trim() : raw
 
         try {
-          const candidates = await searchCandidates(kind, title, year)
-          resolved.push({ input: raw, title, year, kind, candidates })
+          return { input: raw, title, year, kind, candidates: await searchCandidates(kind, title, year) }
         } catch (error) {
           console.warn(`[tmdb] title resolve failed for "${raw}"`, error)
-          resolved.push({ input: raw, title, year, kind, candidates: [] })
+          return { input: raw, title, year, kind, candidates: [] }
         }
+      }
+
+      const resolved: Awaited<ReturnType<typeof resolveOneTitle>>[] = []
+      for (let i = 0; i < titles.length; i += CONCURRENCY) {
+        // Order is preserved: chunks run in sequence and Promise.all keeps
+        // within-chunk order, so the client can match results to its rows.
+        resolved.push(...(await Promise.all(titles.slice(i, i + CONCURRENCY).map(resolveOneTitle))))
       }
 
       json(res, 200, { resolved })

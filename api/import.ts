@@ -49,7 +49,10 @@ interface SearchResults<T> {
   results: T[]
 }
 
+// Groups needing a TMDB round trip per page.
 const RESOLVE_PAGE = 25
+// Groups that arrive with a TMDB id already: no network, one UPDATE each.
+const RESOLVE_FREE_PAGE = 250
 const COMMIT_PAGE = 20
 
 export default handler(async (req: VercelRequest, res: VercelResponse) => {
@@ -118,11 +121,16 @@ async function resolve(
     groups.set(key, list)
   }
 
-  // Groups that already carry a TMDB id need no network call, so they are not
-  // charged against the page budget -- a Trakt import of 400 shows resolves in
-  // one request instead of sixteen.
+  // Groups that already carry a TMDB id need no network call, so they get a
+  // far larger budget than the ones that must hit TMDB -- a Trakt import of
+  // 400 shows resolves in one request instead of sixteen. They are not free
+  // though: each still costs a staging UPDATE, so they are bounded too. An
+  // unbounded page is what turns a big import into a function timeout, and a
+  // timeout mid-page is the one failure this loop cannot report.
   const entries = [...groups.entries()]
-  const free = entries.filter(([, members]) => members[0].tmdb_id != null)
+  const free = entries
+    .filter(([, members]) => members[0].tmdb_id != null)
+    .slice(0, RESOLVE_FREE_PAGE)
   const paid = entries.filter(([, members]) => members[0].tmdb_id == null).slice(0, RESOLVE_PAGE)
   const page = [...free, ...paid]
   let resolvedCount = 0

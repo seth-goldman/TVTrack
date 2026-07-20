@@ -52,26 +52,47 @@ Copy-Item .env.example .env.local
 
 ### 1. Database
 
-Apply both migrations in `supabase/migrations/` — either with the Supabase CLI
+Apply every migration in `supabase/migrations/`, in filename order — either
+with the Supabase CLI
 (`supabase db push`) or by pasting them into the SQL editor in order:
 
 1. `20260720120000_initial_schema.sql` — tables, RLS, triggers
 2. `20260720120100_up_next_and_upcoming.sql` — the `up_next()`, `upcoming()` and
    `watch_stats()` functions
+3. `20260720170000_import_tmdb_id.sql` — the importer's `tmdb_id` staging
+   column. Skipping it makes every import fail on the first staged row.
 
 ### 2. Auth
 
-Signup is disabled by design (PRD F1). Create the account by hand:
-Supabase dashboard → Authentication → Users → **Add user** → *Send invite*.
-Add `http://localhost:5173` and the production URL to
-Authentication → URL Configuration → Redirect URLs.
+Create the account by hand: Supabase dashboard → Authentication → Users →
+**Add user** → *Send invite*. There is no signup UI (PRD F1); whether the
+signup **endpoint** is open is a separate dashboard setting under
+Authentication → Sign In / Providers → Email.
+
+Two URL settings, and the difference matters:
+
+- **Site URL** — the fallback destination for every invite and magic-link
+  email. If a sign-in link ever lands somewhere unexpected, this is why.
+- **Redirect URLs** — the allowlist of destinations that may be requested.
+  Add `https://<your-deployment>/**` and `http://localhost:3000/**`.
+
+While the signup endpoint is open, `ALLOWED_USER_EMAILS` is what stops a
+stranger who registers from using the TMDB proxy — RLS isolates their rows but
+has no opinion about shared resources. `npm run check-users` lists every
+account and flags anything off the allowlist.
 
 ### 3. Environment variables
 
 `VITE_*` values go in `.env.local` for local dev and into Vercel's environment
-variables for deploys. The server-only values (`TMDB_API_KEY`,
-`SUPABASE_SECRET_KEY`, `CRON_SECRET`) go **only** into Vercel — they are never
-bundled into the client. See `.env.example`.
+variables for deploys.
+
+The server-only values (`TMDB_API_KEY`, `SUPABASE_SECRET_KEY`, `CRON_SECRET`,
+`ALLOWED_USER_EMAILS`) also belong in `.env.local` — `vercel dev` reads them
+from there to run the `/api` routes locally — and in the Vercel project for
+deploys. `vercel env pull` fetches the deployed set if you would rather not
+maintain both by hand. What matters is that they are never given a `VITE_`
+prefix and never referenced from `src/`: anything `VITE_` is inlined into the
+browser bundle at build time. See `.env.example`.
 
 Supabase renamed its key pair: `anon` → **publishable** (`sb_publishable_…`)
 and `service_role` → **secret** (`sb_secret_…`). Use the new keys, from

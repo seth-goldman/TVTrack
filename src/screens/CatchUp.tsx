@@ -34,6 +34,8 @@ export default function CatchUp({ onBack, onFinish, toast }: Props) {
   const [entries, setEntries] = useState<CatchUpEntry[]>([])
   const [picking, setPicking] = useState<number | null>(null)
   const [episodePicker, setEpisodePicker] = useState<number | null>(null)
+  const [savedCount, setSavedCount] = useState(0)
+  const [failedCount, setFailedCount] = useState(0)
 
   const titles = parseTitleList(text)
 
@@ -111,12 +113,14 @@ export default function CatchUp({ onBack, onFinish, toast }: Props) {
     setBusy(true)
 
     let applied = 0
+    const failed: string[] = []
     for (const entry of ready) {
       setProgressNote(`Saving ${entry.choice!.title}… ${applied}/${ready.length}`)
       try {
         await applyProgress(entry.choice!.id, entry.episodes, entry.progress)
         applied += 1
       } catch (err) {
+        failed.push(entry.choice!.title)
         toast(
           `${entry.choice!.title}: ${err instanceof Error ? err.message : 'could not save'}`,
           'error',
@@ -126,8 +130,24 @@ export default function CatchUp({ onBack, onFinish, toast }: Props) {
 
     setProgressNote('')
     setBusy(false)
+
+    // Only claim success for what actually saved. Showing the done screen after
+    // a total failure sends the user to an empty Up Next believing their
+    // library is set up — and the natural next move is to type the whole list
+    // again rather than retry.
+    if (applied === 0 && ready.length > 0) {
+      toast('Nothing could be saved — check your connection and try again', 'error')
+      return
+    }
+
+    setSavedCount(applied)
+    setFailedCount(failed.length)
     setPhase('done')
-    toast(`${pluralize(applied, 'show')} set up`)
+    toast(
+      failed.length > 0
+        ? `${pluralize(applied, 'show')} set up, ${failed.length} failed`
+        : `${pluralize(applied, 'show')} set up`,
+    )
   }
 
   function setEntry(input: string, patch: Partial<CatchUpEntry>) {
@@ -326,12 +346,25 @@ export default function CatchUp({ onBack, onFinish, toast }: Props) {
 
         {/* ---------------------------------------------------- step 4 --- */}
         {phase === 'done' ? (
-          <div className="rounded-xl border border-good/30 bg-good/10 p-4">
-            <p className="flex items-center gap-2 text-sm font-medium text-good">
-              <Sparkles className="h-4 w-4" /> Library set up
+          <div
+            className={`rounded-xl border p-4 ${
+              failedCount > 0 ? 'border-warn/30 bg-warn/10' : 'border-good/30 bg-good/10'
+            }`}
+          >
+            <p
+              className={`flex items-center gap-2 text-sm font-medium ${
+                failedCount > 0 ? 'text-warn' : 'text-good'
+              }`}
+            >
+              <Sparkles className="h-4 w-4" />
+              {failedCount > 0
+                ? `${pluralize(savedCount, 'show')} set up, ${failedCount} failed`
+                : 'Library set up'}
             </p>
             <p className="pt-1 text-xs text-white/60">
-              Up Next now has the next episode for everything you were behind on.
+              {failedCount > 0
+                ? 'The ones that failed were not saved. Run this again with just those titles.'
+                : 'Up Next now has the next episode for everything you were behind on.'}
             </p>
             <Button className="mt-3 w-full" onClick={onFinish}>
               Go to Up Next

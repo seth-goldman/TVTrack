@@ -252,6 +252,19 @@ describe('parseExportFile — Letterboxd exports', () => {
   })
 })
 
+describe('parseExportFile — rows carrying only an external id', () => {
+  it('keeps a row identified solely by an IMDb id', () => {
+    const rows = parseExportFile('history.csv', 'imdb_id,season,episode\ntt11280740,1,3')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ imdb_id: 'tt11280740', season: 1, episode: 3 })
+    expect(groupKeyFor(rows[0])).toBe('tv:imdb:tt11280740')
+  })
+
+  it('still discards a row with no identifying information at all', () => {
+    expect(parseExportFile('history.csv', 'season,episode\n1,3')).toHaveLength(0)
+  })
+})
+
 describe('parseExportFile — a plain list of titles', () => {
   it('reads a single-column CSV of show names', () => {
     const rows = parseExportFile('shows.csv', 'title\nSeverance\nThe Bear')

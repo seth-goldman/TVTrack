@@ -321,9 +321,13 @@ function rowFromRecord(
   const watchedAt = toTimestamp(pick(record, WATCHED_ALIASES))
   const title = pick(record, TITLE_ALIASES)
   const tmdbId = toInt(pick(record, TMDB_ALIASES))
+  const imdbId = pick(record, IMDB_ALIASES)
 
   // A row with no identifying information at all is noise (blank line, footer).
-  if (seriesTvdb === null && title === null && tmdbId === null) return null
+  // The test must match everything groupKeyFor can resolve, or rows it could
+  // have matched are silently dropped before they ever reach staging — an
+  // IMDb id alone is enough, and some exports carry nothing else.
+  if (seriesTvdb === null && title === null && tmdbId === null && imdbId === null) return null
 
   const kind = classify(fileName, record, season, episode, rating, watchedAt)
 
@@ -333,7 +337,7 @@ function rowFromRecord(
     raw: record,
     source_file: fileName,
     tvdb_id: seriesTvdb,
-    imdb_id: pick(record, IMDB_ALIASES),
+    imdb_id: imdbId,
     title,
     year: toYear(pick(record, YEAR_ALIASES)),
     season,
