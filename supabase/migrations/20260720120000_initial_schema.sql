@@ -191,9 +191,13 @@ create policy show_cache_meta_read on public.show_cache_meta
   for select to authenticated using (true);
 
 -- ------------------------------------------------------------- triggers ---
+-- search_path is pinned: without it the resolution order is whatever the
+-- calling role has set, which is how a same-named object in an earlier schema
+-- shadows what the function body resolves to.
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
+set search_path = pg_catalog, public
 as $$
 begin
   new.updated_at = now();
