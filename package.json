@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "icons": "node scripts/generate-icons.mjs",
-    "check-users": "node --env-file=.env.local scripts/check-users.mjs"
+    "check-users": "node --env-file=.env.local scripts/check-users.mjs",
+    "invite": "node --env-file=.env.local scripts/invite-user.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
