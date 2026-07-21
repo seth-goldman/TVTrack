@@ -49,6 +49,19 @@ that needs the TMDB key, TMDB for metadata.
 - Dark mode only, mobile-first, bottom tab bar. Tap targets ≥ 44px
   (`min-h-11`).
 
+## Supabase MCP usage
+
+This repo's `.mcp.json` provides `supabase-tvtracker` — a read-only server
+scoped to project `auryucsuyrbjpofikufc`. **Use only that server for anything
+ShowTrack-related.** A separate, generic Supabase connector (account-wide, not
+project-scoped) is also present in most sessions and has access to unrelated
+Supabase projects on this account (other apps entirely). There is no setting
+that restricts it to this repo, so the guard has to be behavioral: never call
+the generic Supabase connector's tools from this project — always reach for
+`supabase-tvtracker`. If a task seems to need write access, tell Seth so he can
+drop `--read-only` from `.mcp.json` for that session rather than reaching for
+the generic connector.
+
 ## Shell command conventions
 
 Seth runs **PowerShell**. Commands written for him to run must use PowerShell

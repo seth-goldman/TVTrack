@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, RefreshCw, Users } from 'lucide-react'
 import {
   getCachedEpisodes,
   getShow,
   getShowRating,
   getWatchedEpisodes,
+  getWatchTogetherCandidate,
   markUnwatched,
   markWatched,
   rateShow,
   removeShow,
   setShowStatus,
+  setWatchTogether,
 } from '../lib/library'
 import {
   airedEpisodesOfSeason,
@@ -19,7 +21,7 @@ import {
   unwatchedEpisodesBefore,
 } from '../lib/episodes'
 import { fetchShow, posterUrl } from '../lib/tmdb'
-import type { CachedEpisode, Show, ShowStatus } from '../lib/types'
+import type { CachedEpisode, Show, ShowStatus, WatchTogetherCandidate } from '../lib/types'
 import { episodeCode, formatAirDate, formatRuntime, pluralize } from '../lib/format'
 import { Button, Poster, Sheet, Spinner, type Toaster } from '../components/ui'
 import RatingPicker from '../components/RatingPicker'
@@ -48,20 +50,24 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
   const [refreshing, setRefreshing] = useState(false)
   const [statusOpen, setStatusOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [partnerStatus, setPartnerStatus] = useState<WatchTogetherCandidate | null>(null)
+  const [togglingTogether, setTogglingTogether] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     try {
       setError(null)
-      const [s, cached, w, r] = await Promise.all([
+      const [s, cached, w, r, partner] = await Promise.all([
         getShow(showId),
         getCachedEpisodes(showId),
         getWatchedEpisodes(showId),
         getShowRating(showId),
+        getWatchTogetherCandidate(showId),
       ])
       setShow(s)
       setEpisodes(cached)
       setWatched(new Set(w.map((e) => key(e.season, e.episode))))
       setRating(r)
+      setPartnerStatus(partner)
 
       // Open the season that holds the next unwatched episode, so the grid
       // lands where the user actually is rather than on season 1.
@@ -70,8 +76,10 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
       const fallback = cached.at(-1)?.season
       const target = next?.season ?? fallback
       if (target !== undefined) setOpenSeasons(new Set([target]))
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load show')
+      return false
     } finally {
       setLoading(false)
     }
@@ -225,6 +233,31 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
     }
   }
 
+  /** Enabling merges both accounts' watched episodes server-side, so the grid
+   *  needs a full reload -- disabling only stops future syncing and can just
+   *  flip the flag locally. */
+  async function toggleWatchTogether() {
+    if (!show) return
+    const next = !show.watched_together
+    setTogglingTogether(true)
+    try {
+      await setWatchTogether(showId, next)
+      setShow((s) => (s ? { ...s, watched_together: next } : s))
+      if (next) {
+        const reloaded = await load()
+        if (!reloaded) {
+          toast('Watching together is on, but the episode grid could not refresh -- reopen the show to see it.', 'error')
+          return
+        }
+      }
+      toast(next ? 'Watching together' : 'Watching together turned off')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not update', 'error')
+    } finally {
+      setTogglingTogether(false)
+    }
+  }
+
   async function onRate(value: number | null) {
     const previous = rating
     setRating(value)
@@ -311,7 +344,25 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
           <RefreshCw className="h-4 w-4" />
           Refresh
         </Button>
+        {partnerStatus?.partner_id ? (
+          <Button
+            variant={show.watched_together ? 'primary' : 'subtle'}
+            onClick={() => void toggleWatchTogether()}
+            busy={togglingTogether}
+            disabled={!show.watched_together && !partnerStatus.partner_has_show}
+          >
+            <Users className="h-4 w-4" />
+            {show.watched_together ? 'Watching together' : 'Watch together'}
+          </Button>
+        ) : null}
       </div>
+
+      {partnerStatus?.partner_id && !show.watched_together && !partnerStatus.partner_has_show ? (
+        <p className="px-4 pt-2 text-xs text-white/35">
+          Your partner isn't tracking this show yet -- once they add it, you can turn watching
+          together on.
+        </p>
+      ) : null}
 
       <div className="px-4 pt-4">
         <RatingPicker value={rating} onChange={(v) => void onRate(v)} />
