@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import { matchId, useRoute } from './lib/router'
-import { ToastStack, useToasts } from './components/ui'
+import { ToastStack, useToasts, type Toaster } from './components/ui'
 import BottomNav from './components/BottomNav'
 import Login from './screens/Login'
 import UpNext from './screens/UpNext'
@@ -30,11 +30,9 @@ export default function App() {
   }, [])
 
   const openShow = useCallback((showId: number) => navigate(`/show/${showId}`), [navigate])
-  const toast = useCallback(
-    (message: string, tone: 'ok' | 'error' = 'ok', undo?: () => void | Promise<void>) =>
-      push(message, tone, undo),
-    [push],
-  )
+  const toast: Toaster = useCallback((message, tone = 'ok', action) => push(message, tone, action), [
+    push,
+  ])
 
   if (!ready) return <div className="min-h-full" />
   if (!session) return <Login />

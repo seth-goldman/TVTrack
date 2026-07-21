@@ -201,21 +201,46 @@ export function Sheet({
 
 // ------------------------------------------------------------- toasts ---
 
+export interface ToastAction {
+  label: string
+  run: () => void | Promise<void>
+}
+
 export interface Toast {
   id: number
   message: string
   tone: 'ok' | 'error'
-  undo?: () => void | Promise<void>
+  /** Optional button on the toast — an Undo, or an offer like "Mark previous". */
+  action?: ToastAction
 }
+
+/** The `toast` callback screens receive. A bare function third arg is an Undo;
+ *  a `{ label, run }` is any other offer. */
+export type Toaster = (
+  message: string,
+  tone?: 'ok' | 'error',
+  action?: (() => void | Promise<void>) | ToastAction,
+) => void
 
 export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextId = useRef(1)
 
-  function push(message: string, tone: 'ok' | 'error' = 'ok', undo?: Toast['undo']) {
+  /**
+   * `action` is either an undo callback (button reads "Undo") or a
+   * `{ label, run }` pair for any other offer. A toast with an action lingers
+   * longer, since it is asking the user to decide rather than just informing.
+   */
+  function push(
+    message: string,
+    tone: 'ok' | 'error' = 'ok',
+    action?: (() => void | Promise<void>) | Toast['action'],
+  ) {
     const id = nextId.current++
-    setToasts((t) => [...t, { id, message, tone, undo }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), undo ? 6000 : 3000)
+    const resolved: Toast['action'] =
+      typeof action === 'function' ? { label: 'Undo', run: action } : action
+    setToasts((t) => [...t, { id, message, tone, action: resolved }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), resolved ? 6000 : 3000)
   }
 
   function dismiss(id: number) {
@@ -245,17 +270,17 @@ export function ToastStack({
           }`}
         >
           <span className="min-w-0 flex-1 truncate">{t.message}</span>
-          {t.undo ? (
+          {t.action ? (
             <button
               className="min-h-11 shrink-0 px-2 font-semibold text-brand-soft"
               onClick={() => {
-                // Dismiss only once the undo actually lands, so a failure
-                // leaves the button on screen to retry. The undo callback owns
+                // Dismiss only once the action actually lands, so a failure
+                // leaves the button on screen to retry. The callback owns
                 // reporting its own error.
-                void Promise.resolve(t.undo?.()).then(() => onDismiss(t.id))
+                void Promise.resolve(t.action?.run()).then(() => onDismiss(t.id))
               }}
             >
-              Undo
+              {t.action.label}
             </button>
           ) : null}
         </div>

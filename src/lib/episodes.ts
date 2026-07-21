@@ -46,6 +46,24 @@ export function allAiredEpisodes(episodes: CachedEpisode[]): EpisodeRef[] {
   return episodes.filter(hasAired).map(toRef)
 }
 
+/**
+ * Aired episodes strictly before the given one that are not yet watched — the
+ * set offered by the "mark N earlier" prompt when a single episode is checked.
+ * Excludes the episode itself (the caller just marked it) and anything already
+ * watched, so re-checking an episode mid-run offers only the real gaps.
+ */
+export function unwatchedEpisodesBefore(
+  episodes: CachedEpisode[],
+  season: number,
+  episode: number,
+  isWatched: (season: number, episode: number) => boolean,
+): EpisodeRef[] {
+  return airedEpisodesUpTo(episodes, season, episode).filter(
+    (r) =>
+      !(r.season === season && r.episode === episode) && !isWatched(r.season, r.episode),
+  )
+}
+
 /** Seasons present in the cache, ascending. */
 export function seasonsOf(episodes: CachedEpisode[]): number[] {
   return [...new Set(episodes.map((e) => e.season))].sort((a, b) => a - b)

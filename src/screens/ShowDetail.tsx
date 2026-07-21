@@ -16,11 +16,12 @@ import {
   airedEpisodesUpTo,
   allAiredEpisodes,
   hasAired,
+  unwatchedEpisodesBefore,
 } from '../lib/episodes'
 import { fetchShow, posterUrl } from '../lib/tmdb'
 import type { CachedEpisode, Show, ShowStatus } from '../lib/types'
 import { episodeCode, formatAirDate, formatRuntime, pluralize } from '../lib/format'
-import { Button, Poster, Sheet, Spinner } from '../components/ui'
+import { Button, Poster, Sheet, Spinner, type Toaster } from '../components/ui'
 import RatingPicker from '../components/RatingPicker'
 
 const STATUS_LABELS: Record<ShowStatus, string> = {
@@ -34,7 +35,7 @@ const STATUS_LABELS: Record<ShowStatus, string> = {
 interface Props {
   showId: number
   onBack: () => void
-  toast: (message: string, tone?: 'ok' | 'error') => void
+  toast: Toaster
 }
 
 export default function ShowDetail({ showId, onBack, toast }: Props) {
@@ -126,16 +127,57 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
     })
 
     try {
-      if (isWatched) await markUnwatched(showId, [{ season: e.season, episode: e.episode }])
-      else
-        await markWatched(showId, [
-          { season: e.season, episode: e.episode, tmdb_episode_id: e.tmdb_episode_id },
-        ])
+      if (isWatched) {
+        await markUnwatched(showId, [{ season: e.season, episode: e.episode }])
+        return
+      }
+
+      await markWatched(showId, [
+        { season: e.season, episode: e.episode, tmdb_episode_id: e.tmdb_episode_id },
+      ])
+
+      // Marking one episode usually means "I've watched up to here", not "I
+      // watched only this one". If earlier aired episodes are still unwatched,
+      // offer to fill them in rather than making the user tap each box.
+      const earlierUnwatched = unwatchedEpisodesBefore(
+        episodes,
+        e.season,
+        e.episode,
+        (s, ep) => watched.has(key(s, ep)),
+      )
+      if (earlierUnwatched.length > 0) {
+        toast(`${episodeCode(e.season, e.episode)} watched`, 'ok', {
+          label: `Mark ${earlierUnwatched.length} earlier`,
+          run: () => backfill(earlierUnwatched),
+        })
+      }
     } catch (err) {
       setWatched((prev) => {
         const next = new Set(prev)
         if (isWatched) next.add(k)
         else next.delete(k)
+        return next
+      })
+      toast(err instanceof Error ? err.message : 'Could not save', 'error')
+    }
+  }
+
+  /** Fill in the earlier episodes the toast offered. Optimistic, with rollback
+   *  so a failed write does not leave the grid showing them as watched. */
+  async function backfill(refs: { season: number; episode: number }[]) {
+    const keys = refs.map((r) => key(r.season, r.episode))
+    setWatched((prev) => {
+      const next = new Set(prev)
+      for (const kk of keys) next.add(kk)
+      return next
+    })
+    try {
+      await markWatched(showId, refs)
+      toast(`${refs.length} earlier episodes marked watched`)
+    } catch (err) {
+      setWatched((prev) => {
+        const next = new Set(prev)
+        for (const kk of keys) next.delete(kk)
         return next
       })
       toast(err instanceof Error ? err.message : 'Could not save', 'error')
