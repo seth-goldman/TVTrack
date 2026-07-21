@@ -16,6 +16,7 @@ import type {
   UpNextRow,
   UpcomingRow,
   WatchedEpisode,
+  WatchTogetherCandidate,
 } from './types'
 
 async function userId(): Promise<string> {
@@ -88,6 +89,27 @@ export async function getWatchedEpisodes(showId: number): Promise<WatchedEpisode
         .order('episode'),
     ) ?? []
   )
+}
+
+/** Whether the caller has a household partner, and whether that partner
+ *  already tracks this show -- gates the "watch together" toggle in the UI. */
+export async function getWatchTogetherCandidate(showId: number): Promise<WatchTogetherCandidate | null> {
+  const { data, error } = await supabase
+    .rpc('watch_together_candidate', { p_show_id: showId })
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data as WatchTogetherCandidate | null
+}
+
+/** Turn watching-together on or off for a show. Enabling it requires the
+ *  household partner to already track the same show and merges both
+ *  accounts' watched episodes; disabling it only stops future syncing. */
+export async function setWatchTogether(showId: number, enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_watch_together', {
+    p_show_id: showId,
+    p_enabled: enabled,
+  })
+  if (error) throw new Error(error.message)
 }
 
 export async function getShowRating(showId: number): Promise<number | null> {

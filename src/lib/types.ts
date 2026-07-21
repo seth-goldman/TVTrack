@@ -12,8 +12,17 @@ export interface Show {
   tmdb_status: string | null
   first_air: string | null
   episode_runtime: number | null
+  watched_together: boolean
   added_at: string
   updated_at: string
+}
+
+/** Result of `watch_together_candidate()` -- whether the caller has a
+ *  household partner, and whether that partner already tracks this show. */
+export interface WatchTogetherCandidate {
+  partner_id: string | null
+  partner_has_show: boolean
+  partner_watched_together: boolean
 }
 
 export interface Movie {
