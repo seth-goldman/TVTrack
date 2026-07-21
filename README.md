@@ -138,6 +138,33 @@ npx vercel deploy --prod
 Environment variables live in the Vercel project for all three environments.
 After changing one, redeploy — `VITE_*` values are baked in at build time.
 
+## Supabase MCP (Claude Code)
+
+This repo carries a project-scoped Supabase MCP server in
+[`.mcp.json`](.mcp.json), pinned to project ref `auryucsuyrbjpofikufc` and run
+`--read-only`. It is deliberately independent of any global claude.ai Supabase
+connector, which follows whichever account was last authorised — TV Tracker
+lives on its own (free) Supabase account, so this repo pins its own connection.
+
+`.mcp.json` contains no secret: it references `SUPABASE_ACCESS_TOKEN_TVTRACKER`,
+which each machine supplies from its own environment. To set it up:
+
+1. Generate a Personal Access Token at
+   <https://supabase.com/dashboard/account/tokens> while signed into the account
+   that owns the project.
+2. Persist it as a user env var (PowerShell), pasting when prompted — no
+   `-AsSecureString`, which some terminals fail to paste into:
+   ```powershell
+   $t = (Read-Host "Paste the Supabase PAT").Trim()
+   [Environment]::SetEnvironmentVariable('SUPABASE_ACCESS_TOKEN_TVTRACKER', $t, 'User')
+   ```
+3. Fully restart the terminal (env vars are read at process start), then start
+   Claude Code and approve the `supabase-tvtracker` server when prompted.
+
+Read-only blocks `apply_migration`; drop the `--read-only` arg for a session
+that needs to run one. The server runs through `cmd /c npx` because native
+Windows cannot spawn `npx` directly.
+
 ## Architecture
 
 ```

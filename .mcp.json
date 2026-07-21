@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "supabase-tvtracker": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@supabase/mcp-server-supabase@0.9.0",
+        "--read-only",
+        "--project-ref=auryucsuyrbjpofikufc"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN_TVTRACKER}"
+      }
+    }
+  }
+}
