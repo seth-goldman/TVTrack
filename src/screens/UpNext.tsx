@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, ChevronRight, MoreHorizontal, Popcorn } from 'lucide-react'
+import { Check, MoreHorizontal, Popcorn } from 'lucide-react'
 import {
   getCachedEpisodes,
   getUpNext,
@@ -168,25 +168,22 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
           <h2 className="pt-8 pb-2 text-xs font-semibold tracking-wide text-white/40 uppercase">
             Up to date
           </h2>
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
             {upToDate.map((row) => (
               <button
                 key={row.show_id}
                 onClick={() => onOpenShow(row.show_id)}
-                className="flex items-center gap-3 rounded-xl border border-hairline bg-surface p-2 text-left"
+                className="min-w-0 text-left"
               >
-                <Poster path={row.poster_path} alt={row.title} className="h-16 w-11 shrink-0" size="w154" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{row.title}</p>
-                  <p className="truncate text-xs text-white/45">
-                    {row.upcoming_air_date
-                      ? `${episodeCode(row.upcoming_season ?? 0, row.upcoming_episode ?? 0)} · ${formatAirDate(row.upcoming_air_date)}`
-                      : row.tmdb_status === 'Ended' || row.tmdb_status === 'Canceled'
-                        ? `${row.tmdb_status} · ${pluralize(row.watched_count, 'episode')} watched`
-                        : 'No air date announced'}
-                  </p>
-                </div>
-                <ChevronRight className="h-4 w-4 shrink-0 text-white/30" />
+                <Poster path={row.poster_path} alt={row.title} className="aspect-[2/3] w-full" size="w342" />
+                <p className="truncate pt-1.5 text-xs font-medium">{row.title}</p>
+                <p className="truncate text-[11px] text-white/45">
+                  {row.upcoming_air_date
+                    ? `${episodeCode(row.upcoming_season ?? 0, row.upcoming_episode ?? 0)} · ${formatAirDate(row.upcoming_air_date)}`
+                    : row.tmdb_status === 'Ended' || row.tmdb_status === 'Canceled'
+                      ? `${row.tmdb_status} · ${pluralize(row.watched_count, 'episode')} watched`
+                      : 'No air date announced'}
+                </p>
               </button>
             ))}
           </div>
