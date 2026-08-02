@@ -124,8 +124,12 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
     )
   }
 
-  const ready = rows.filter((r) => r.season !== null && !pending.has(r.show_id))
-  const upToDate = rows.filter((r) => r.season === null || pending.has(r.show_id))
+  const ready = rows.filter(
+    (r) => r.season !== null && r.episode !== null && !pending.has(r.show_id),
+  )
+  const upToDate = rows.filter(
+    (r) => r.season === null || r.episode === null || pending.has(r.show_id),
+  )
 
   return (
     <Screen title="Up Next">
@@ -147,7 +151,7 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
         />
       ) : null}
 
-      <div className="flex flex-col gap-3 pt-4">
+      <div className="grid grid-cols-2 gap-3 pt-4 sm:grid-cols-3">
         {ready.map((row) => (
           <UpNextCard
             key={row.show_id}
@@ -236,39 +240,41 @@ function UpNextCard({
   const remaining = Math.max(row.aired_count - row.watched_count, 0)
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-hairline bg-surface">
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-hairline bg-surface">
       <button onClick={onOpen} className="block w-full text-left">
         <div className="relative aspect-video w-full bg-surface-2">
           {still ? (
             <img src={still} alt="" className="h-full w-full object-cover" loading="lazy" />
           ) : null}
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-3">
-            <p className="truncate text-sm font-semibold">{row.title}</p>
-            <p className="truncate text-xs text-white/70">
-              {code}
-              {row.episode_name ? ` · ${row.episode_name}` : ''}
-            </p>
-          </div>
+          {remaining > 1 ? (
+            <span className="absolute top-1.5 right-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white/85">
+              {remaining} left
+            </span>
+          ) : null}
+        </div>
+        <div className="px-2 pt-2">
+          <p className="truncate text-sm font-semibold">{row.title}</p>
+          <p className="truncate text-xs text-white/60">
+            {code}
+            {row.episode_name ? ` · ${row.episode_name}` : ''}
+          </p>
+          <p className="truncate text-[11px] text-white/40">{formatAirDate(row.air_date)}</p>
         </div>
       </button>
 
-      <div className="flex items-center gap-2 p-2">
+      <div className="mt-auto flex items-center gap-1 p-2">
         <button
           onClick={onCheckIn}
           aria-label={`Mark ${row.title} ${code} watched`}
-          className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-white active:scale-[0.99]"
+          className="flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand px-2 text-sm font-semibold text-white active:scale-[0.99]"
         >
-          <Check className="h-4 w-4" />
-          Watched
+          <Check className="h-4 w-4 shrink-0" />
+          <span className="truncate">Watched</span>
         </button>
-        <div className="px-1 text-right text-[11px] leading-tight text-white/40">
-          <div>{formatAirDate(row.air_date)}</div>
-          <div>{remaining > 0 ? `${remaining} left` : ''}</div>
-        </div>
         <button
           onClick={onMenu}
           aria-label={`More actions for ${row.title}`}
-          className="rounded-xl p-3 text-white/50 hover:bg-surface-2"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-white/50 hover:bg-surface-2"
         >
           <MoreHorizontal className="h-5 w-5" />
         </button>
