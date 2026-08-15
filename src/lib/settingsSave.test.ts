@@ -156,6 +156,25 @@ describe('createSettingsReconciler', () => {
     expect(reconciler.confirmed()).toEqual(S1)
   })
 
+  // The seeding effect is passive, so React runs it after paint -- a fast tap on
+  // a freshly loaded screen beats it. The seed must still take effect, or the
+  // reconciler has no rollback target and a failed write strands the optimistic
+  // value on screen permanently.
+  it('accepts a seed that arrives after a save has already started', async () => {
+    const { calls, write } = controllable()
+    const { published, reconciler } = harness(write)
+
+    const done = reconciler.save(S1)
+    reconciler.seed(S0)
+    expect(reconciler.confirmed()).toEqual(S0)
+
+    await tick()
+    calls[0].settle(false)
+    await done
+
+    expect(published).toEqual([S1, S0])
+  })
+
   it('takes only the first seed', () => {
     const { write } = controllable()
     const { reconciler } = harness(write)

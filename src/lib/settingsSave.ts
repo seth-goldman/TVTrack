@@ -30,8 +30,16 @@ export interface SettingsReconciler {
   save(next: WatchSettings): Promise<Error | null>
   /** The last value the server accepted, or null before any load. */
   confirmed(): WatchSettings | null
-  /** Seed the confirmed value from the initial load. Ignored once a write has
-   *  been confirmed, so a late-arriving read cannot undo a successful save. */
+  /**
+   * Seed the confirmed value from the initial load.
+   *
+   * Ignored once anything has been confirmed -- a slow initial read must not
+   * clobber a save that has since succeeded. Deliberately NOT ignored merely
+   * because a save has started: callers seed from a passive effect, which React
+   * runs after paint, so a fast tap can beat it. Blocking the seed there would
+   * leave the reconciler with no rollback target at all, and a failed write
+   * would strand the optimistic value on screen.
+   */
   seed(settings: WatchSettings): void
 }
 
@@ -40,7 +48,6 @@ export function createSettingsReconciler(
   publish: (settings: WatchSettings) => void,
 ): SettingsReconciler {
   let confirmed: WatchSettings | null = null
-  let seeded = false
   let seq = 0
   // Serialises the writes. Each link swallows the previous link's rejection so
   // one failure does not abort every queued write behind it.
@@ -50,14 +57,12 @@ export function createSettingsReconciler(
     confirmed: () => confirmed,
 
     seed(settings) {
-      if (seeded) return
-      seeded = true
+      if (confirmed !== null) return
       confirmed = settings
     },
 
     async save(next) {
       const mine = ++seq
-      seeded = true
       publish(next)
 
       const run = queue.catch(() => {}).then(() => write(next))
