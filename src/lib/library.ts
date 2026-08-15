@@ -1,4 +1,5 @@
 import { apiJson, supabase } from './supabase'
+import type { Database } from './database.types'
 import { fetchMovie, fetchShow } from './tmdb'
 import {
   airedEpisodesUpTo,
@@ -39,22 +40,37 @@ function unwrap<T>({ data, error }: { data: T | null; error: { message: string }
   return data as T
 }
 
-/**
- * Narrow a generated row type to its domain type.
- *
- * The only gap between the two is CHECK-constrained text columns: Postgres
- * guarantees `shows.status` is one of five values, but a CHECK constraint is
- * invisible to the type generator, so it emits `string` where we want
- * `ShowStatus`. We genuinely do know more than the generated types here.
- *
- * This is the one narrowing the schema cannot express; everything else --
- * column names, nullability, table names -- is now checked for real. Making it
- * unnecessary means converting those columns to Postgres enums, which the
- * generator does emit as unions. That is a migration against live data, so it
- * is deliberately not bundled with this change.
- */
-function narrow<T>(rows: unknown): T {
-  return rows as T
+// ------------------------------------------------- generated row adapters ---
+//
+// The only gap between a generated row and its domain type is CHECK-constrained
+// text columns: Postgres guarantees `shows.status` is one of five values, but a
+// CHECK constraint is invisible to the type generator, so it emits `string`
+// where we want `ShowStatus`.
+//
+// These adapters cast that ONE field and let the compiler check the rest. A
+// blanket `as Show[]` would have silenced precisely the errors this file was
+// typed to catch -- rename a column and the spread below stops satisfying the
+// domain type, which is the whole point.
+//
+// Making them unnecessary means converting those columns to Postgres enums,
+// which the generator does emit as unions. That is a migration against live
+// data, so it is deliberately not bundled with this change.
+
+type TableRow<T extends keyof Database['public']['Tables']> =
+  Database['public']['Tables'][T]['Row']
+
+function toShow(row: TableRow<'shows'>): Show {
+  return { ...row, status: row.status as ShowStatus }
+}
+
+function toMovie(row: TableRow<'movies'>): Movie {
+  return { ...row, status: row.status as MovieStatus }
+}
+
+function toUpcoming(
+  row: Database['public']['Functions']['upcoming']['Returns'][number],
+): UpcomingRow {
+  return { ...row, kind: row.kind as UpcomingRow['kind'] }
 }
 
 // -------------------------------------------------------------- reads ---
@@ -64,7 +80,7 @@ export async function getUpNext(): Promise<UpNextRow[]> {
 }
 
 export async function getUpcoming(days = 30): Promise<UpcomingRow[]> {
-  return narrow<UpcomingRow[]>(unwrap(await supabase.rpc('upcoming', { days }))) ?? []
+  return (unwrap(await supabase.rpc('upcoming', { days })) ?? []).map(toUpcoming)
 }
 
 export async function getStats(): Promise<MonthStat[]> {
@@ -74,19 +90,19 @@ export async function getStats(): Promise<MonthStat[]> {
 export async function getShows(status?: ShowStatus | ShowStatus[]): Promise<Show[]> {
   let query = supabase.from('shows').select('*').order('title')
   if (status) query = Array.isArray(status) ? query.in('status', status) : query.eq('status', status)
-  return narrow<Show[]>(unwrap(await query)) ?? []
+  return (unwrap(await query) ?? []).map(toShow)
 }
 
 export async function getShow(showId: number): Promise<Show | null> {
   const { data, error } = await supabase.from('shows').select('*').eq('id', showId).maybeSingle()
   if (error) throw new Error(error.message)
-  return narrow<Show | null>(data)
+  return data ? toShow(data) : null
 }
 
 export async function getMovies(status?: MovieStatus): Promise<Movie[]> {
   let query = supabase.from('movies').select('*').order('title')
   if (status) query = query.eq('status', status)
-  return narrow<Movie[]>(unwrap(await query)) ?? []
+  return (unwrap(await query) ?? []).map(toMovie)
 }
 
 export async function getCachedEpisodes(showId: number): Promise<CachedEpisode[]> {
@@ -259,7 +275,7 @@ export async function addShow(tmdbId: number, status: ShowStatus): Promise<Show>
     .select()
     .single()
   if (error) throw new Error(error.message)
-  return data as Show
+  return toShow(data)
 }
 
 export async function setShowStatus(showId: number, status: ShowStatus): Promise<void> {
@@ -369,7 +385,7 @@ export async function addMovie(tmdbId: number, status: MovieStatus): Promise<Mov
     .select()
     .single()
   if (error) throw new Error(error.message)
-  return data as Movie
+  return toMovie(data)
 }
 
 export async function setMovieWatched(
