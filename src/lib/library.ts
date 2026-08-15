@@ -39,6 +39,24 @@ function unwrap<T>({ data, error }: { data: T | null; error: { message: string }
   return data as T
 }
 
+/**
+ * Narrow a generated row type to its domain type.
+ *
+ * The only gap between the two is CHECK-constrained text columns: Postgres
+ * guarantees `shows.status` is one of five values, but a CHECK constraint is
+ * invisible to the type generator, so it emits `string` where we want
+ * `ShowStatus`. We genuinely do know more than the generated types here.
+ *
+ * This is the one narrowing the schema cannot express; everything else --
+ * column names, nullability, table names -- is now checked for real. Making it
+ * unnecessary means converting those columns to Postgres enums, which the
+ * generator does emit as unions. That is a migration against live data, so it
+ * is deliberately not bundled with this change.
+ */
+function narrow<T>(rows: unknown): T {
+  return rows as T
+}
+
 // -------------------------------------------------------------- reads ---
 
 export async function getUpNext(): Promise<UpNextRow[]> {
@@ -46,7 +64,7 @@ export async function getUpNext(): Promise<UpNextRow[]> {
 }
 
 export async function getUpcoming(days = 30): Promise<UpcomingRow[]> {
-  return unwrap(await supabase.rpc('upcoming', { days })) ?? []
+  return narrow<UpcomingRow[]>(unwrap(await supabase.rpc('upcoming', { days }))) ?? []
 }
 
 export async function getStats(): Promise<MonthStat[]> {
@@ -56,19 +74,19 @@ export async function getStats(): Promise<MonthStat[]> {
 export async function getShows(status?: ShowStatus | ShowStatus[]): Promise<Show[]> {
   let query = supabase.from('shows').select('*').order('title')
   if (status) query = Array.isArray(status) ? query.in('status', status) : query.eq('status', status)
-  return unwrap(await query) ?? []
+  return narrow<Show[]>(unwrap(await query)) ?? []
 }
 
 export async function getShow(showId: number): Promise<Show | null> {
   const { data, error } = await supabase.from('shows').select('*').eq('id', showId).maybeSingle()
   if (error) throw new Error(error.message)
-  return data
+  return narrow<Show | null>(data)
 }
 
 export async function getMovies(status?: MovieStatus): Promise<Movie[]> {
   let query = supabase.from('movies').select('*').order('title')
   if (status) query = query.eq('status', status)
-  return unwrap(await query) ?? []
+  return narrow<Movie[]>(unwrap(await query)) ?? []
 }
 
 export async function getCachedEpisodes(showId: number): Promise<CachedEpisode[]> {
@@ -149,15 +167,17 @@ export async function getWatchProviders(
     )
 
     for (const row of rows ?? []) {
-      found.set(row.tmdb_id as number, {
-        tmdb_id: row.tmdb_id as number,
+      found.set(row.tmdb_id, {
+        tmdb_id: row.tmdb_id,
         kind,
         region,
-        link: (row.link as string | null) ?? null,
+        link: row.link,
         // Hydrated, not re-normalised: the stored payload is already in our
-        // own shape. This only guarantees all four buckets exist.
+        // own shape. This only guarantees all four buckets exist. `providers`
+        // is a jsonb column, so it arrives as Json and the shape inside it is
+        // still ours to check -- generated types stop at the column boundary.
         providers: hydrateProviders(row.providers),
-        refreshed_at: row.refreshed_at as string,
+        refreshed_at: row.refreshed_at,
       })
     }
   }
@@ -174,12 +194,14 @@ export async function getUserSettings(): Promise<WatchSettings> {
   if (error) throw new Error(error.message)
   if (!data) return DEFAULT_WATCH_SETTINGS
 
-  const region = typeof data.watch_region === 'string' ? data.watch_region : ''
+  // watch_region is CHECK-constrained to two uppercase letters, but a CHECK is
+  // invisible to the generated types and this value drives a cache key, so it
+  // is still validated rather than trusted.
   return {
-    watch_region: isValidRegion(region) ? region : DEFAULT_WATCH_SETTINGS.watch_region,
-    subscribed_providers: Array.isArray(data.subscribed_providers)
-      ? (data.subscribed_providers as number[])
-      : [],
+    watch_region: isValidRegion(data.watch_region)
+      ? data.watch_region
+      : DEFAULT_WATCH_SETTINGS.watch_region,
+    subscribed_providers: data.subscribed_providers,
   }
 }
 
