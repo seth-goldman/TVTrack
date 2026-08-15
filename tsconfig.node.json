@@ -11,7 +11,15 @@
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  // src/lib/tvtime.ts is shared: the API imports its grouping helper so the
-  // browser and the server cannot disagree about what one show is.
-  "include": ["vite.config.ts", "vitest.config.ts", "api/**/*.ts", "src/lib/tvtime.ts"]
+  // Two src/lib modules are shared with the API so the browser and the server
+  // cannot disagree about a shape they both touch: tvtime.ts (what counts as
+  // one show during an import) and providers.ts (how a TMDB watch-provider
+  // payload is normalised before it is written to the cache).
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "api/**/*.ts",
+    "src/lib/tvtime.ts",
+    "src/lib/providers.ts"
+  ]
 }

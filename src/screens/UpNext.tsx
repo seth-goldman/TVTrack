@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, MoreHorizontal, Popcorn } from 'lucide-react'
+import { Check, MoreHorizontal, Popcorn, Tv } from 'lucide-react'
 import {
   getCachedEpisodes,
   getUpNext,
@@ -8,10 +8,13 @@ import {
   setShowStatus,
 } from '../lib/library'
 import { airedEpisodesOfSeason, allAiredEpisodes } from '../lib/episodes'
+import { useWatchProviders } from '../lib/useWatchProviders'
+import type { WatchProviderEntry, WatchSettings } from '../lib/providers'
 import type { UpNextRow } from '../lib/types'
 import { episodeCode, formatAirDate, pluralize } from '../lib/format'
 import { stillUrl } from '../lib/tmdb'
 import { Button, EmptyState, Poster, Screen, Sheet, Spinner } from '../components/ui'
+import { ProviderBadge, WhereToWatchSheet } from '../components/WatchProviders'
 
 interface Props {
   onOpenShow: (showId: number) => void
@@ -27,6 +30,9 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
   // advances the instant it is tapped instead of after a Postgres round-trip.
   const [pending, setPending] = useState<Set<number>>(new Set())
   const [menuFor, setMenuFor] = useState<UpNextRow | null>(null)
+  const [whereFor, setWhereFor] = useState<UpNextRow | null>(null)
+
+  const watch = useWatchProviders('tv', (rows ?? []).map((r) => r.show_id))
 
   const load = useCallback(async () => {
     try {
@@ -156,6 +162,8 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
           <UpNextCard
             key={row.show_id}
             row={row}
+            watchEntry={watch.entries.get(row.show_id)}
+            watchSettings={watch.settings}
             onCheckIn={() => void checkIn(row)}
             onOpen={() => onOpenShow(row.show_id)}
             onMenu={() => setMenuFor(row)}
@@ -173,9 +181,10 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
               <button
                 key={row.show_id}
                 onClick={() => onOpenShow(row.show_id)}
-                className="min-w-0 text-left"
+                className="relative min-w-0 text-left"
               >
                 <Poster path={row.poster_path} alt={row.title} className="aspect-[2/3] w-full" size="w342" />
+                <ProviderBadge entry={watch.entries.get(row.show_id)} settings={watch.settings} />
                 <p className="truncate pt-1.5 text-xs font-medium">{row.title}</p>
                 <p className="truncate text-[11px] text-white/45">
                   {row.upcoming_air_date
@@ -204,6 +213,16 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
             <Button variant="subtle" onClick={() => onOpenShow(menuFor.show_id)}>
               Open episode grid
             </Button>
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setWhereFor(menuFor)
+                setMenuFor(null)
+              }}
+            >
+              <Tv className="h-4 w-4" />
+              Where to watch
+            </Button>
             <div className="my-1 h-px bg-hairline" />
             <Button variant="ghost" onClick={() => void changeStatus(menuFor, 'paused')}>
               Pause
@@ -217,17 +236,30 @@ export default function UpNext({ onOpenShow, onSearch, onCatchUp, toast }: Props
           </div>
         ) : null}
       </Sheet>
+
+      <WhereToWatchSheet
+        open={whereFor !== null}
+        onClose={() => setWhereFor(null)}
+        title={whereFor?.title ?? ''}
+        entry={whereFor ? watch.entries.get(whereFor.show_id) : null}
+        settings={watch.settings}
+        loading={watch.loading}
+      />
     </Screen>
   )
 }
 
 function UpNextCard({
   row,
+  watchEntry,
+  watchSettings,
   onCheckIn,
   onOpen,
   onMenu,
 }: {
   row: UpNextRow
+  watchEntry: WatchProviderEntry | undefined
+  watchSettings: WatchSettings
   onCheckIn: () => void
   onOpen: () => void
   onMenu: () => void
@@ -243,6 +275,7 @@ function UpNextCard({
           {still ? (
             <img src={still} alt="" className="h-full w-full object-cover" loading="lazy" />
           ) : null}
+          <ProviderBadge entry={watchEntry} settings={watchSettings} />
           {remaining > 1 ? (
             <span className="absolute top-1.5 right-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white/85">
               {remaining} left

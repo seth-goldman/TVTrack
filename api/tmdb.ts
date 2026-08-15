@@ -7,6 +7,7 @@ import {
   json,
   param,
   refreshShowCache,
+  refreshWatchProviders,
   requireUser,
   requiredInt,
   tmdb,
@@ -227,6 +228,53 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
           console.warn(`[tmdb] refresh failed for show ${id}`, error)
         }
       }
+      json(res, 200, { refreshed })
+      return
+    }
+
+    // Warm watch_provider_cache for a batch of titles. The client sends only
+    // what it has already found to be missing or past its TTL, then reads the
+    // rows back from Postgres -- this response is just an acknowledgement.
+    case 'watch-providers': {
+      if (req.method !== 'POST') throw new HttpError(405, 'Use POST')
+      const body = (req.body ?? {}) as { ids?: unknown; kind?: unknown; region?: unknown }
+      const kind = body.kind === 'movie' ? 'movie' : 'tv'
+
+      const region = typeof body.region === 'string' ? body.region.toUpperCase() : 'US'
+      if (!/^[A-Z]{2}$/.test(region)) throw new HttpError(400, 'Invalid region')
+
+      const ids = [
+        ...new Set(
+          Array.isArray(body.ids)
+            ? body.ids.filter(
+                (id): id is number => typeof id === 'number' && Number.isSafeInteger(id) && id > 0,
+              )
+            : [],
+        ),
+      ].slice(0, 40)
+      if (ids.length === 0) throw new HttpError(400, 'Missing ids')
+
+      // One cheap TMDB call per title, six at a time -- the same bounded
+      // concurrency as resolve-titles, and for the same reason: sequential is
+      // too slow for a full grid, unbounded is rude to TMDB.
+      const CONCURRENCY = 6
+      const refreshed: number[] = []
+
+      for (let i = 0; i < ids.length; i += CONCURRENCY) {
+        await Promise.all(
+          ids.slice(i, i + CONCURRENCY).map(async (id) => {
+            try {
+              await refreshWatchProviders(kind, id, region)
+              refreshed.push(id)
+            } catch (error) {
+              // One unavailable title must not fail the whole grid; the client
+              // simply renders no badge for it and retries after the TTL.
+              console.warn(`[tmdb] provider refresh failed for ${kind} ${id}`, error)
+            }
+          }),
+        )
+      }
+
       json(res, 200, { refreshed })
       return
     }

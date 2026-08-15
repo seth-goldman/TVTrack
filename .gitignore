@@ -9,3 +9,5 @@ dist
 data/tvtime-export/
 
 .vercel
+
+supabase/.temp

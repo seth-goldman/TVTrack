@@ -28,7 +28,10 @@ that needs the TMDB key, TMDB for metadata.
    household account must need no schema change.
 4. **Check-in speed is the product.** App open → episode marked in one tap.
    Optimistic UI first, network second.
-5. **TMDB attribution stays in Settings** — required by TMDB's terms.
+5. **TMDB attribution stays in Settings** — required by TMDB's terms. The
+   watch-provider data is JustWatch's, and TMDB's terms require crediting them
+   too: every surface showing more than a bare provider logo carries
+   `JustWatchCredit`.
 
 ## Conventions
 
@@ -36,13 +39,16 @@ that needs the TMDB key, TMDB for metadata.
   `src/components/` holds shared primitives. Screens do not talk to Supabase
   directly — they call `lib/library.ts`.
 - Pure logic modules (`tvtime.ts`, `csv.ts`, `format.ts`, `episodes.ts`,
-  `catchup.ts`) must not import `supabase.ts`, which throws at module load
-  without env vars and would break their unit tests. When a feature needs both,
-  the pure half goes in its own module and the writes go in `library.ts`.
-- `src/lib/tvtime.ts` is imported by `api/import.ts` as well as the browser —
-  `groupKeyFor` must stay identical on both sides or the commit writes to
-  groups the user never reviewed. It is listed in `tsconfig.node.json` for
-  this reason.
+  `catchup.ts`, `providers.ts`, `images.ts`) must not import `supabase.ts`,
+  which throws at module load without env vars and would break their unit
+  tests. When a feature needs both, the pure half goes in its own module and
+  the writes go in `library.ts`.
+- Two modules are shared with `api/` and listed in `tsconfig.node.json` for
+  that reason. `src/lib/tvtime.ts` — `groupKeyFor` must stay identical on both
+  sides or an import commit writes to groups the user never reviewed.
+  `src/lib/providers.ts` — `normaliseProviders` is what the proxy writes into
+  `watch_provider_cache` and what the browser reads back out, so a change to
+  the bucket shape has to happen in one place.
 - Tests are `src/**/*.test.ts`, run on the `node` environment. The parser is
   the piece most worth testing — it is the one thing that can silently corrupt
   a decade of history.

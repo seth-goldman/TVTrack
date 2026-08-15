@@ -6,6 +6,13 @@ import {
   type EpisodeRef,
 } from './episodes'
 import type { Progress, ResolvedTitle } from './catchup'
+import {
+  DEFAULT_WATCH_SETTINGS,
+  hydrateProviders,
+  isValidRegion,
+  type WatchProviderEntry,
+  type WatchSettings,
+} from './providers'
 import type {
   CachedEpisode,
   MonthStat,
@@ -109,6 +116,83 @@ export async function setWatchTogether(showId: number, enabled: boolean): Promis
     p_show_id: showId,
     p_enabled: enabled,
   })
+  if (error) throw new Error(error.message)
+}
+
+// ----------------------------------------------------- watch providers ---
+
+/**
+ * Cached availability for a batch of titles, keyed by TMDB id. Reads only --
+ * warming a stale row goes through the proxy, which owns the TMDB key.
+ *
+ * Chunked because the id list is a URL filter: a library of a few hundred
+ * shows would otherwise build a query string long enough for PostgREST to
+ * reject.
+ */
+export async function getWatchProviders(
+  ids: number[],
+  kind: 'tv' | 'movie',
+  region: string,
+): Promise<Map<number, WatchProviderEntry>> {
+  const unique = [...new Set(ids)]
+  const found = new Map<number, WatchProviderEntry>()
+  if (unique.length === 0) return found
+
+  for (let i = 0; i < unique.length; i += 200) {
+    const rows = unwrap(
+      await supabase
+        .from('watch_provider_cache')
+        .select('tmdb_id, kind, region, link, providers, refreshed_at')
+        .eq('kind', kind)
+        .eq('region', region)
+        .in('tmdb_id', unique.slice(i, i + 200)),
+    )
+
+    for (const row of rows ?? []) {
+      found.set(row.tmdb_id as number, {
+        tmdb_id: row.tmdb_id as number,
+        kind,
+        region,
+        link: (row.link as string | null) ?? null,
+        // Hydrated, not re-normalised: the stored payload is already in our
+        // own shape. This only guarantees all four buckets exist.
+        providers: hydrateProviders(row.providers),
+        refreshed_at: row.refreshed_at as string,
+      })
+    }
+  }
+  return found
+}
+
+/** Region and subscribed services. No row yet means defaults, so a new account
+ *  needs no backfill. */
+export async function getUserSettings(): Promise<WatchSettings> {
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('watch_region, subscribed_providers')
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return DEFAULT_WATCH_SETTINGS
+
+  const region = typeof data.watch_region === 'string' ? data.watch_region : ''
+  return {
+    watch_region: isValidRegion(region) ? region : DEFAULT_WATCH_SETTINGS.watch_region,
+    subscribed_providers: Array.isArray(data.subscribed_providers)
+      ? (data.subscribed_providers as number[])
+      : [],
+  }
+}
+
+export async function saveUserSettings(settings: WatchSettings): Promise<void> {
+  const uid = await userId()
+  const { error } = await supabase.from('user_settings').upsert(
+    {
+      user_id: uid,
+      watch_region: settings.watch_region,
+      subscribed_providers: settings.subscribed_providers,
+    },
+    { onConflict: 'user_id' },
+  )
   if (error) throw new Error(error.message)
 }
 
