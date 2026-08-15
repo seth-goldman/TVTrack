@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react'
-import { Download, ListPlus, LogOut, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Download, ListPlus, LogOut, Upload } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { downloadCsvs, downloadJson } from '../lib/export'
-import { getStats } from '../lib/library'
+import { getMovies, getShows, getStats, saveUserSettings } from '../lib/library'
+import { providerLogoUrl } from '../lib/images'
+import { knownProviders, WATCH_REGIONS, type WatchSettings } from '../lib/providers'
+import { publishWatchSettings, useWatchProviders, useWatchSettings } from '../lib/useWatchProviders'
 import type { MonthStat } from '../lib/types'
 import { formatHours } from '../lib/format'
 import { Button, Screen } from '../components/ui'
+import { JustWatchCredit } from '../components/WatchProviders'
 
 interface Props {
   email: string | null
@@ -17,12 +21,89 @@ interface Props {
 export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
   const [stats, setStats] = useState<MonthStat[] | null>(null)
   const [busy, setBusy] = useState<'json' | 'csv' | null>(null)
+  const [showIds, setShowIds] = useState<number[]>([])
+  const [movieIds, setMovieIds] = useState<number[]>([])
 
   useEffect(() => {
     getStats()
       .then(setStats)
       .catch(() => setStats([]))
   }, [])
+
+  // The subscription picker offers the services that actually appear in this
+  // library rather than TMDB's several hundred worldwide providers.
+  useEffect(() => {
+    getShows()
+      .then((rows) => setShowIds(rows.map((r) => r.id)))
+      .catch(() => setShowIds([]))
+    getMovies()
+      .then((rows) => setMovieIds(rows.map((r) => r.id)))
+      .catch(() => setMovieIds([]))
+  }, [])
+
+  const settings = useWatchSettings()
+  // Read-only: this screen summarises what the badge-bearing screens have
+  // already looked up. Warming here would mean opening Settings to export a
+  // CSV kicked off a TMDB refresh of the entire library.
+  const showWatch = useWatchProviders('tv', showIds, { warm: false })
+  const movieWatch = useWatchProviders('movie', movieIds, { warm: false })
+
+  const providerOptions = useMemo(
+    () => knownProviders([...showWatch.entries.values(), ...movieWatch.entries.values()]),
+    [showWatch.entries, movieWatch.entries],
+  )
+
+  // Each save writes the whole row, so two in flight at once can land out of
+  // order and persist the older one -- tapping two provider chips quickly would
+  // silently drop the first. These serialise the writes and make sure only the
+  // newest attempt is allowed to roll the UI back.
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const saveSeq = useRef(0)
+  // The last value the server actually acknowledged. Rolling back to the
+  // previous *optimistic* value would, after two consecutive failures, leave
+  // the UI showing a selection that never reached Postgres -- it would survive
+  // until the next reload and then silently vanish.
+  const confirmed = useRef<WatchSettings | null>(null)
+
+  useEffect(() => {
+    if (settings && confirmed.current === null) confirmed.current = settings
+  }, [settings])
+
+  /** Applied optimistically and published so every mounted screen re-badges
+   *  immediately; a failed write rolls back to the last confirmed value. */
+  async function updateSettings(next: WatchSettings) {
+    const seq = ++saveSeq.current
+    publishWatchSettings(next)
+
+    const run = saveQueue.current.catch(() => {}).then(() => saveUserSettings(next))
+    saveQueue.current = run.catch(() => {})
+
+    try {
+      await run
+      confirmed.current = next
+    } catch (err) {
+      // Read at failure time, never captured up front: the queue guarantees any
+      // earlier write has already settled by now, so if that one succeeded this
+      // picks up its value. Capturing before the queue drained would roll back
+      // past a save that did land.
+      const fallback = confirmed.current ?? settings
+      // An older failure must not discard a newer choice the user can already
+      // see applied -- only the latest attempt owns the rollback.
+      if (seq === saveSeq.current && fallback) publishWatchSettings(fallback)
+      toast(err instanceof Error ? err.message : 'Could not save settings', 'error')
+    }
+  }
+
+  function toggleProvider(id: number) {
+    if (!settings) return
+    const has = settings.subscribed_providers.includes(id)
+    void updateSettings({
+      ...settings,
+      subscribed_providers: has
+        ? settings.subscribed_providers.filter((p) => p !== id)
+        : [...settings.subscribed_providers, id],
+    })
+  }
 
   async function exportAs(kind: 'json' | 'csv') {
     setBusy(kind)
@@ -77,6 +158,81 @@ export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
           <p className="pt-2 text-[11px] text-white/30">
             {recent.length > 0 ? 'Episodes per month, last 12 months' : 'No check-ins yet'}
           </p>
+        </div>
+      </section>
+
+      <section className="pt-8">
+        <h2 className="pb-2 text-xs font-semibold tracking-wide text-white/40 uppercase">
+          Where to watch
+        </h2>
+        <div className="rounded-xl border border-hairline bg-surface p-4">
+          <label htmlFor="watch-region" className="block text-sm font-medium">
+            Region
+          </label>
+          <p className="pt-1 text-xs text-white/45">
+            Streaming rights differ by country, so this decides which services are shown.
+          </p>
+          <select
+            id="watch-region"
+            value={settings?.watch_region ?? 'US'}
+            disabled={!settings}
+            onChange={(e) =>
+              settings ? void updateSettings({ ...settings, watch_region: e.target.value }) : null
+            }
+            className="mt-2 min-h-11 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm disabled:opacity-50"
+          >
+            {WATCH_REGIONS.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+
+          <p className="pt-5 text-sm font-medium">Services you subscribe to</p>
+          <p className="pt-1 text-xs text-white/45">
+            Tap the ones you pay for. They get highlighted on posters and sorted first, so a show
+            you can already stream never looks like one you have to rent.
+          </p>
+
+          {providerOptions.length === 0 ? (
+            <p className="pt-3 text-xs text-white/35">
+              {showIds.length + movieIds.length === 0
+                ? 'Add some shows first — this list is built from what your library is available on.'
+                : showWatch.loading || movieWatch.loading
+                  ? 'Working out which services your library is on…'
+                  : 'Open Up Next or Library once and this fills in with the services your shows are on.'}
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2 pt-3">
+              {providerOptions.map((provider) => {
+                const on = settings?.subscribed_providers.includes(provider.id) ?? false
+                const logo = providerLogoUrl(provider.logo_path)
+                return (
+                  <button
+                    key={provider.id}
+                    onClick={() => toggleProvider(provider.id)}
+                    disabled={!settings}
+                    aria-pressed={on}
+                    className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-2.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      on
+                        ? 'border-brand bg-brand/15 text-white'
+                        : 'border-hairline bg-surface-2 text-white/60'
+                    }`}
+                  >
+                    {logo ? (
+                      <img src={logo} alt="" loading="lazy" className="h-5 w-5 rounded object-cover" />
+                    ) : null}
+                    <span className="max-w-32 truncate">{provider.name}</span>
+                    {on ? <Check className="h-3.5 w-3.5 shrink-0 text-brand-soft" /> : null}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="pt-4">
+            <JustWatchCredit />
+          </div>
         </div>
       </section>
 

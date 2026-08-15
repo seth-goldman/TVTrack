@@ -21,9 +21,11 @@ import {
   unwatchedEpisodesBefore,
 } from '../lib/episodes'
 import { fetchShow, posterUrl } from '../lib/tmdb'
+import { useWatchProviders } from '../lib/useWatchProviders'
 import type { CachedEpisode, Show, ShowStatus, WatchTogetherCandidate } from '../lib/types'
 import { episodeCode, formatAirDate, formatRuntime, pluralize } from '../lib/format'
 import { Button, Poster, Sheet, Spinner, type Toaster } from '../components/ui'
+import { ProviderChips, WhereToWatchSheet } from '../components/WatchProviders'
 import RatingPicker from '../components/RatingPicker'
 
 const STATUS_LABELS: Record<ShowStatus, string> = {
@@ -52,6 +54,10 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [partnerStatus, setPartnerStatus] = useState<WatchTogetherCandidate | null>(null)
   const [togglingTogether, setTogglingTogether] = useState(false)
+  const [whereOpen, setWhereOpen] = useState(false)
+
+  const watch = useWatchProviders('tv', [showId])
+  const watchEntry = watch.entries.get(showId)
 
   const load = useCallback(async (): Promise<boolean> => {
     try {
@@ -364,6 +370,15 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
         </p>
       ) : null}
 
+      <div className="px-4 pt-5">
+        <ProviderChips
+          entry={watchEntry}
+          settings={watch.settings}
+          loading={watch.loading}
+          onMore={() => setWhereOpen(true)}
+        />
+      </div>
+
       <div className="px-4 pt-4">
         <RatingPicker value={rating} onChange={(v) => void onRate(v)} />
       </div>
@@ -506,6 +521,15 @@ export default function ShowDetail({ showId, onBack, toast }: Props) {
       <p className="px-4 pt-6 text-xs text-white/30">
         {pluralize(episodes.length, 'episode')} cached
       </p>
+
+      <WhereToWatchSheet
+        open={whereOpen}
+        onClose={() => setWhereOpen(false)}
+        title={show.title}
+        entry={watchEntry}
+        settings={watch.settings}
+        loading={watch.loading}
+      />
 
       <Sheet open={statusOpen} onClose={() => setStatusOpen(false)} title="Show status">
         <div className="flex flex-col gap-2">

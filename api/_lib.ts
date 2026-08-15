@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { normaliseProviders } from '../src/lib/providers.js'
 
 // The TMDB key and the service-role key live only in Vercel env vars. Nothing
 // in this file is bundled into the client (PRD section 9 / CLAUDE.md secrets).
@@ -301,4 +302,41 @@ export async function refreshShowCache(showId: number): Promise<{
   if (metaError) throw new HttpError(500, `Cache meta write failed: ${metaError.message}`)
 
   return { show, episodes: rows.length }
+}
+
+// -------------------------------------------------------- watch providers ---
+
+interface TmdbWatchProviderResponse {
+  results?: Record<string, Record<string, unknown> & { link?: string }>
+}
+
+/**
+ * Pull JustWatch availability for one title in one region and upsert it into
+ * watch_provider_cache.
+ *
+ * A region with no availability is cached as an empty payload rather than
+ * skipped. "TMDB says nowhere" is a real answer with a real TTL; treating it as
+ * a cache miss would re-ask on every render for exactly the titles that will
+ * never come back with anything.
+ */
+export async function refreshWatchProviders(
+  kind: 'tv' | 'movie',
+  tmdbId: number,
+  region: string,
+): Promise<void> {
+  const data = await tmdb<TmdbWatchProviderResponse>(`/${kind}/${tmdbId}/watch/providers`)
+  const forRegion = data.results?.[region] ?? {}
+
+  const { error } = await admin().from('watch_provider_cache').upsert(
+    {
+      tmdb_id: tmdbId,
+      kind,
+      region,
+      link: typeof forRegion.link === 'string' ? forRegion.link : null,
+      providers: normaliseProviders(forRegion),
+      refreshed_at: new Date().toISOString(),
+    },
+    { onConflict: 'tmdb_id,kind,region' },
+  )
+  if (error) throw new HttpError(500, `Provider cache write failed: ${error.message}`)
 }

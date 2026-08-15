@@ -8,9 +8,11 @@ import {
   setMovieWatched,
   setShowStatus,
 } from '../lib/library'
+import { useWatchProviders } from '../lib/useWatchProviders'
 import type { Movie, Show, ShowStatus } from '../lib/types'
 import { formatWatchedAt } from '../lib/format'
 import { Button, EmptyState, Poster, Screen, Sheet, Spinner } from '../components/ui'
+import { ProviderBadge, WhereToWatchSheet } from '../components/WatchProviders'
 import RatingPicker from '../components/RatingPicker'
 
 type Tab = 'watching' | 'watchlist' | 'completed' | 'movies'
@@ -34,6 +36,12 @@ export default function Library({ onOpenShow, onSearch, onCatchUp, toast }: Prop
   const [shows, setShows] = useState<Show[] | null>(null)
   const [movies, setMovies] = useState<Movie[] | null>(null)
   const [movieSheet, setMovieSheet] = useState<Movie | null>(null)
+  const [movieWhere, setMovieWhere] = useState<Movie | null>(null)
+
+  // Shows and movies are separate TMDB namespaces, so they cannot share a
+  // lookup even though the same id space overlaps.
+  const showWatch = useWatchProviders('tv', (shows ?? []).map((s) => s.id))
+  const movieWatch = useWatchProviders('movie', (movies ?? []).map((m) => m.id))
 
   // Switching tabs quickly can leave a slow request in flight; without this
   // guard its results land after the new tab's and the screen shows the wrong
@@ -158,8 +166,9 @@ export default function Library({ onOpenShow, onSearch, onCatchUp, toast }: Prop
         <div className="grid grid-cols-3 gap-3 pt-4 sm:grid-cols-4">
           {showList.map((show) => (
             <div key={show.id} className="flex flex-col gap-1">
-              <button onClick={() => onOpenShow(show.id)} className="text-left">
+              <button onClick={() => onOpenShow(show.id)} className="relative text-left">
                 <Poster path={show.poster_path} alt={show.title} className="aspect-[2/3] w-full" />
+                <ProviderBadge entry={showWatch.entries.get(show.id)} settings={showWatch.settings} />
               </button>
               <p className="truncate text-xs font-medium">{show.title}</p>
               {tab === 'watchlist' ? (
@@ -189,6 +198,10 @@ export default function Library({ onOpenShow, onSearch, onCatchUp, toast }: Prop
               <div key={movie.id} className="flex flex-col gap-1">
                 <button onClick={() => setMovieSheet(movie)} className="relative text-left">
                   <Poster path={movie.poster_path} alt={movie.title} className="aspect-[2/3] w-full" />
+                  <ProviderBadge
+                    entry={movieWatch.entries.get(movie.id)}
+                    settings={movieWatch.settings}
+                  />
                   {movie.status === 'watched' ? (
                     <span className="absolute top-1 right-1 rounded-full bg-good/90 px-1.5 py-0.5 text-[9px] font-bold text-ink-900">
                       SEEN
@@ -232,6 +245,17 @@ export default function Library({ onOpenShow, onSearch, onCatchUp, toast }: Prop
             <Button onClick={() => void toggleMovieWatched(movieSheet)}>
               {movieSheet.status === 'watched' ? 'Move back to watchlist' : 'Mark watched'}
             </Button>
+            {/* Swapped rather than stacked: two Sheets mounted at once fight
+                over the focus trap and the body scroll lock. */}
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setMovieWhere(movieSheet)
+                setMovieSheet(null)
+              }}
+            >
+              Where to watch
+            </Button>
             <Button
               variant="danger"
               onClick={() => {
@@ -247,6 +271,15 @@ export default function Library({ onOpenShow, onSearch, onCatchUp, toast }: Prop
           </div>
         ) : null}
       </Sheet>
+
+      <WhereToWatchSheet
+        open={movieWhere !== null}
+        onClose={() => setMovieWhere(null)}
+        title={movieWhere?.title ?? ''}
+        entry={movieWhere ? movieWatch.entries.get(movieWhere.id) : null}
+        settings={movieWatch.settings}
+        loading={movieWatch.loading}
+      />
     </Screen>
   )
 }

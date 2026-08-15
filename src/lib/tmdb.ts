@@ -5,20 +5,17 @@ import type {
   ShowDetailPayload,
 } from './types'
 
-// TMDB image CDN. Sizes come from TMDB's documented configuration; hard-coding
-// the handful we use avoids a configuration round-trip on every cold start.
-const IMAGE_BASE = 'https://image.tmdb.org/t/p'
-
-export type PosterSize = 'w154' | 'w185' | 'w342' | 'w500'
-export type StillSize = 'w300' | 'w500'
-
-export function posterUrl(path: string | null | undefined, size: PosterSize = 'w342'): string | null {
-  return path ? `${IMAGE_BASE}/${size}${path}` : null
-}
-
-export function stillUrl(path: string | null | undefined, size: StillSize = 'w300'): string | null {
-  return path ? `${IMAGE_BASE}/${size}${path}` : null
-}
+// Image CDN helpers live in images.ts, which is dependency-free so pure modules
+// can use them too. Re-exported here because this is where callers look for
+// anything TMDB-shaped.
+export {
+  posterUrl,
+  providerLogoUrl,
+  stillUrl,
+  type LogoSize,
+  type PosterSize,
+  type StillSize,
+} from './images'
 
 export function searchShows(query: string): Promise<{ results: SearchResult[] }> {
   return apiJson(`/api/tmdb?action=search-tv&q=${encodeURIComponent(query)}`)
@@ -66,4 +63,20 @@ export function cacheStatus(
   showIds: number[],
 ): Promise<{ cached: { show_id: number; refreshed_at: string }[] }> {
   return apiJson(`/api/tmdb?action=cache-status&ids=${showIds.join(',')}`)
+}
+
+/**
+ * Warm watch_provider_cache for titles the client has found to be missing or
+ * past their TTL. Fire-and-forget from the UI's point of view: the rows are
+ * read back from Postgres, not from this response.
+ */
+export function warmWatchProviders(
+  ids: number[],
+  kind: 'tv' | 'movie',
+  region: string,
+): Promise<{ refreshed: number[] }> {
+  return apiJson('/api/tmdb?action=watch-providers', {
+    method: 'POST',
+    body: JSON.stringify({ ids, kind, region }),
+  })
 }
