@@ -175,6 +175,43 @@ describe('createSettingsReconciler', () => {
     expect(published).toEqual([S1, S0])
   })
 
+  // The mirror of the case above: the write fails *before* the seed lands, so
+  // there is no baseline to roll back to at failure time. The rollback is owed
+  // until the seed supplies one -- otherwise the failed value sits on screen
+  // permanently with nothing behind it.
+  it('rolls back when the seed arrives after the save has already failed', async () => {
+    const { calls, write } = controllable()
+    const { published, reconciler } = harness(write)
+
+    const done = reconciler.save(S1)
+    await tick()
+    calls[0].settle(false)
+    await done
+
+    expect(published).toEqual([S1])
+
+    reconciler.seed(S0)
+    expect(published).toEqual([S1, S0])
+    expect(reconciler.confirmed()).toEqual(S0)
+  })
+
+  // ...but only if nothing newer is on screen. A newer save owns the display.
+  it('does not pay an owed rollback once a newer save has started', async () => {
+    const { calls, write } = controllable()
+    const { published, reconciler } = harness(write)
+
+    const first = reconciler.save(S1)
+    await tick()
+    calls[0].settle(false)
+    await first
+
+    void reconciler.save(S2)
+    reconciler.seed(S0)
+
+    expect(published).toEqual([S1, S2])
+    expect(reconciler.confirmed()).toEqual(S0)
+  })
+
   it('takes only the first seed', () => {
     const { write } = controllable()
     const { reconciler } = harness(write)

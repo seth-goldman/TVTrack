@@ -52,6 +52,11 @@ export function createSettingsReconciler(
   // Serialises the writes. Each link swallows the previous link's rejection so
   // one failure does not abort every queued write behind it.
   let queue: Promise<unknown> = Promise.resolve()
+  // Set when the newest save fails before anything has been confirmed: there is
+  // nothing to roll back to *yet*, so the rollback is owed until a seed supplies
+  // a baseline. Without this the failed optimistic value stays on screen with
+  // nothing behind it and never corrects itself.
+  let owedRollback: number | null = null
 
   return {
     confirmed: () => confirmed,
@@ -59,6 +64,14 @@ export function createSettingsReconciler(
     seed(settings) {
       if (confirmed !== null) return
       confirmed = settings
+
+      // Only pay the debt if no newer save has started since. A newer save has
+      // put its own optimistic value on screen, and an older failure must not
+      // discard it -- the same rule the catch below applies.
+      if (owedRollback === seq) {
+        owedRollback = null
+        publish(settings)
+      }
     },
 
     async save(next) {
@@ -76,7 +89,13 @@ export function createSettingsReconciler(
         // `confirmed` is read here, not captured above: the queue guarantees
         // every earlier write has settled by now, so if one of them succeeded
         // this picks up its value rather than rolling back past it.
-        if (mine === seq && confirmed) publish(confirmed)
+        if (mine === seq) {
+          if (confirmed) publish(confirmed)
+          // Nothing confirmed yet -- the initial read has not landed. Record the
+          // debt so the seed pays it rather than silently leaving the failed
+          // value on screen.
+          else owedRollback = mine
+        }
         return error instanceof Error ? error : new Error(String(error))
       }
     },
