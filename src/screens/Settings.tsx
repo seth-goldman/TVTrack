@@ -5,6 +5,7 @@ import { downloadCsvs, downloadJson } from '../lib/export'
 import { getMovies, getShows, getStats, saveUserSettings } from '../lib/library'
 import { providerLogoUrl } from '../lib/images'
 import { knownProviders, WATCH_REGIONS, type WatchSettings } from '../lib/providers'
+import { createSettingsReconciler } from '../lib/settingsSave'
 import { publishWatchSettings, useWatchProviders, useWatchSettings } from '../lib/useWatchProviders'
 import type { MonthStat } from '../lib/types'
 import { formatHours } from '../lib/format'
@@ -53,45 +54,22 @@ export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
     [showWatch.entries, movieWatch.entries],
   )
 
-  // Each save writes the whole row, so two in flight at once can land out of
-  // order and persist the older one -- tapping two provider chips quickly would
-  // silently drop the first. These serialise the writes and make sure only the
-  // newest attempt is allowed to roll the UI back.
-  const saveQueue = useRef<Promise<unknown>>(Promise.resolve())
-  const saveSeq = useRef(0)
-  // The last value the server actually acknowledged. Rolling back to the
-  // previous *optimistic* value would, after two consecutive failures, leave
-  // the UI showing a selection that never reached Postgres -- it would survive
-  // until the next reload and then silently vanish.
-  const confirmed = useRef<WatchSettings | null>(null)
+  // Ordering the writes and picking the right value to roll back to is subtle
+  // enough that the inline version was wrong three times during review, so it
+  // lives in settingsSave.ts where it has tests. This screen just drives it.
+  const reconciler = useRef(
+    createSettingsReconciler(saveUserSettings, publishWatchSettings),
+  ).current
 
   useEffect(() => {
-    if (settings && confirmed.current === null) confirmed.current = settings
-  }, [settings])
+    if (settings) reconciler.seed(settings)
+  }, [settings, reconciler])
 
   /** Applied optimistically and published so every mounted screen re-badges
    *  immediately; a failed write rolls back to the last confirmed value. */
   async function updateSettings(next: WatchSettings) {
-    const seq = ++saveSeq.current
-    publishWatchSettings(next)
-
-    const run = saveQueue.current.catch(() => {}).then(() => saveUserSettings(next))
-    saveQueue.current = run.catch(() => {})
-
-    try {
-      await run
-      confirmed.current = next
-    } catch (err) {
-      // Read at failure time, never captured up front: the queue guarantees any
-      // earlier write has already settled by now, so if that one succeeded this
-      // picks up its value. Capturing before the queue drained would roll back
-      // past a save that did land.
-      const fallback = confirmed.current ?? settings
-      // An older failure must not discard a newer choice the user can already
-      // see applied -- only the latest attempt owns the rollback.
-      if (seq === saveSeq.current && fallback) publishWatchSettings(fallback)
-      toast(err instanceof Error ? err.message : 'Could not save settings', 'error')
-    }
+    const error = await reconciler.save(next)
+    if (error) toast(error.message, 'error')
   }
 
   function toggleProvider(id: number) {
