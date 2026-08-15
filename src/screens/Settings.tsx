@@ -72,7 +72,6 @@ export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
   /** Applied optimistically and published so every mounted screen re-badges
    *  immediately; a failed write rolls back to the last confirmed value. */
   async function updateSettings(next: WatchSettings) {
-    const fallback = confirmed.current ?? settings
     const seq = ++saveSeq.current
     publishWatchSettings(next)
 
@@ -83,6 +82,11 @@ export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
       await run
       confirmed.current = next
     } catch (err) {
+      // Read at failure time, never captured up front: the queue guarantees any
+      // earlier write has already settled by now, so if that one succeeded this
+      // picks up its value. Capturing before the queue drained would roll back
+      // past a save that did land.
+      const fallback = confirmed.current ?? settings
       // An older failure must not discard a newer choice the user can already
       // see applied -- only the latest attempt owns the rollback.
       if (seq === saveSeq.current && fallback) publishWatchSettings(fallback)
