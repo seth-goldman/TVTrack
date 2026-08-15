@@ -238,7 +238,13 @@ export default handler(async (req: VercelRequest, res: VercelResponse) => {
     case 'watch-providers': {
       if (req.method !== 'POST') throw new HttpError(405, 'Use POST')
       const body = (req.body ?? {}) as { ids?: unknown; kind?: unknown; region?: unknown }
-      const kind = body.kind === 'movie' ? 'movie' : 'tv'
+
+      // Validated rather than coerced. Silently turning an unrecognised kind
+      // into 'tv' would fetch /tv/{id} for what the caller meant as a movie and
+      // file the result under a key the caller never reads, so the client would
+      // re-warm it forever.
+      if (body.kind !== 'tv' && body.kind !== 'movie') throw new HttpError(400, 'Invalid kind')
+      const kind = body.kind
 
       const region = typeof body.region === 'string' ? body.region.toUpperCase() : 'US'
       if (!/^[A-Z]{2}$/.test(region)) throw new HttpError(400, 'Invalid region')

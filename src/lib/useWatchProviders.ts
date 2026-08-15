@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getUserSettings, getWatchProviders } from './library'
+import { supabase } from './supabase'
 import { warmWatchProviders } from './tmdb'
 import {
   DEFAULT_WATCH_SETTINGS,
@@ -20,13 +21,43 @@ const WARM_CHUNK = 40
 // publishes the new value on save, which re-renders whatever is mounted.
 
 let cachedSettings: WatchSettings | null = null
+let cachedForUser: string | null = null
 let inflight: Promise<WatchSettings> | null = null
-const listeners = new Set<(settings: WatchSettings) => void>()
+const listeners = new Set<(settings: WatchSettings | null) => void>()
+
+function notify(settings: WatchSettings | null): void {
+  for (const listener of listeners) listener(settings)
+}
+
+/**
+ * Drop the cache whenever the signed-in user changes.
+ *
+ * `App` swaps sessions in place via onAuthStateChange without reloading the
+ * page, so module state outlives a sign-out. Without this, the second household
+ * account inherits the first one's region and services on sign-in -- and the
+ * moment they change a setting, that stale snapshot is written into *their*
+ * row. RLS cannot help here; the leak is entirely client-side.
+ */
+supabase.auth.onAuthStateChange((_event, session) => {
+  const uid = session?.user?.id ?? null
+  if (uid === cachedForUser) return
+
+  cachedForUser = uid
+  cachedSettings = null
+  inflight = null
+  notify(null)
+
+  if (uid) void loadSettings().then(notify).catch(() => notify(DEFAULT_WATCH_SETTINGS))
+})
 
 function loadSettings(): Promise<WatchSettings> {
   if (cachedSettings) return Promise.resolve(cachedSettings)
+  // Captured now and checked on resolve: a sign-out mid-flight must not let the
+  // previous account's row land in the new account's cache.
+  const forUser = cachedForUser
   inflight ??= getUserSettings()
     .then((settings) => {
+      if (forUser !== cachedForUser) return settings
       // A save that landed while this read was in flight wins -- otherwise the
       // server's pre-save value would quietly overwrite the user's change.
       cachedSettings ??= settings
@@ -41,7 +72,7 @@ function loadSettings(): Promise<WatchSettings> {
 /** Publish a just-saved value so mounted screens pick it up without a reload. */
 export function publishWatchSettings(settings: WatchSettings): void {
   cachedSettings = settings
-  for (const listener of listeners) listener(settings)
+  notify(settings)
 }
 
 /** Null until the first load resolves, so callers can hold off rendering a
@@ -51,7 +82,9 @@ export function useWatchSettings(): WatchSettings | null {
 
   useEffect(() => {
     listeners.add(setSettings)
-    if (!cachedSettings) {
+    if (cachedSettings) {
+      setSettings(cachedSettings)
+    } else {
       // A settings read that fails should not block the badges entirely --
       // defaults still give a correct US answer, just without highlighting.
       void loadSettings()
@@ -118,6 +151,10 @@ export function useWatchProviders(
     }
 
     let cancelled = false
+    // Cleared before the read, not after: entries are scoped by kind+region, so
+    // leaving the old map up means that after a region change the grid shows
+    // US providers under a GB setting until the replacement query lands.
+    setEntries(new Map())
     setLoading(true)
 
     void (async () => {

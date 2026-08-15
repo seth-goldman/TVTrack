@@ -16,9 +16,12 @@ that needs the TMDB key, TMDB for metadata.
    Anything needing them goes in `api/`. Client code calls `/api/tmdb` or
    `/api/import` through `apiFetch`, never TMDB directly. The secret key
    (`sb_secret_…`, formerly `service_role`) bypasses RLS entirely — it is used
-   for exactly one thing here: writing the shared `episode_cache` /
-   `show_cache_meta` catalogue tables. Never use it for user-owned rows; use
-   `asUser(token)` so RLS still applies.
+   for exactly one thing here: writing the shared catalogue tables
+   (`episode_cache`, `show_cache_meta`, `watch_provider_cache`). Those are
+   public TMDB data, keyed by TMDB id with no `user_id` column, readable by any
+   signed-in user and writable only through the proxy. Never use the secret key
+   for user-owned rows — `user_settings` included; use `asUser(token)` so RLS
+   still applies.
 2. **Never lose watch history.** `import_staging` holds raw export rows
    untouched; commits are idempotent upserts that preserve the original
    `watched_at`. A re-run must never overwrite a real timestamp with `now()`.

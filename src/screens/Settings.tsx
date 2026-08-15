@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Download, ListPlus, LogOut, Upload } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { downloadCsvs, downloadJson } from '../lib/export'
@@ -53,15 +53,29 @@ export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
     [showWatch.entries, movieWatch.entries],
   )
 
+  // Each save writes the whole row, so two in flight at once can land out of
+  // order and persist the older one -- tapping two provider chips quickly would
+  // silently drop the first. These serialise the writes and make sure only the
+  // newest attempt is allowed to roll the UI back.
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const saveSeq = useRef(0)
+
   /** Applied optimistically and published so every mounted screen re-badges
    *  immediately; a failed write rolls the shared value back. */
   async function updateSettings(next: WatchSettings) {
     const previous = settings
+    const seq = ++saveSeq.current
     publishWatchSettings(next)
+
+    const run = saveQueue.current.catch(() => {}).then(() => saveUserSettings(next))
+    saveQueue.current = run.catch(() => {})
+
     try {
-      await saveUserSettings(next)
+      await run
     } catch (err) {
-      if (previous) publishWatchSettings(previous)
+      // An older failure must not discard a newer choice the user can already
+      // see applied -- only the latest attempt owns the rollback.
+      if (seq === saveSeq.current && previous) publishWatchSettings(previous)
       toast(err instanceof Error ? err.message : 'Could not save settings', 'error')
     }
   }

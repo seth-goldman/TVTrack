@@ -142,6 +142,10 @@ export function ProviderChips({
           ))}
         </div>
       ))}
+      {/* Required by TMDB's terms: this row shows provider names, not just a
+          bare logo, so the credit has to be on the screen itself rather than
+          one tap away in the sheet. */}
+      <JustWatchCredit />
     </div>
   )
 }
