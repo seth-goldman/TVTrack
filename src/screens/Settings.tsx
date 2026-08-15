@@ -59,11 +59,20 @@ export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
   // newest attempt is allowed to roll the UI back.
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve())
   const saveSeq = useRef(0)
+  // The last value the server actually acknowledged. Rolling back to the
+  // previous *optimistic* value would, after two consecutive failures, leave
+  // the UI showing a selection that never reached Postgres -- it would survive
+  // until the next reload and then silently vanish.
+  const confirmed = useRef<WatchSettings | null>(null)
+
+  useEffect(() => {
+    if (settings && confirmed.current === null) confirmed.current = settings
+  }, [settings])
 
   /** Applied optimistically and published so every mounted screen re-badges
-   *  immediately; a failed write rolls the shared value back. */
+   *  immediately; a failed write rolls back to the last confirmed value. */
   async function updateSettings(next: WatchSettings) {
-    const previous = settings
+    const fallback = confirmed.current ?? settings
     const seq = ++saveSeq.current
     publishWatchSettings(next)
 
@@ -72,10 +81,11 @@ export default function Settings({ email, onImport, onCatchUp, toast }: Props) {
 
     try {
       await run
+      confirmed.current = next
     } catch (err) {
       // An older failure must not discard a newer choice the user can already
       // see applied -- only the latest attempt owns the rollback.
-      if (seq === saveSeq.current && previous) publishWatchSettings(previous)
+      if (seq === saveSeq.current && fallback) publishWatchSettings(fallback)
       toast(err instanceof Error ? err.message : 'Could not save settings', 'error')
     }
   }
