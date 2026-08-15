@@ -1,4 +1,5 @@
 import { apiJson, supabase } from './supabase'
+import type { Database } from './database.types'
 import { fetchMovie, fetchShow } from './tmdb'
 import {
   airedEpisodesUpTo,
@@ -39,6 +40,39 @@ function unwrap<T>({ data, error }: { data: T | null; error: { message: string }
   return data as T
 }
 
+// ------------------------------------------------- generated row adapters ---
+//
+// The only gap between a generated row and its domain type is CHECK-constrained
+// text columns: Postgres guarantees `shows.status` is one of five values, but a
+// CHECK constraint is invisible to the type generator, so it emits `string`
+// where we want `ShowStatus`.
+//
+// These adapters cast that ONE field and let the compiler check the rest. A
+// blanket `as Show[]` would have silenced precisely the errors this file was
+// typed to catch -- rename a column and the spread below stops satisfying the
+// domain type, which is the whole point.
+//
+// Making them unnecessary means converting those columns to Postgres enums,
+// which the generator does emit as unions. That is a migration against live
+// data, so it is deliberately not bundled with this change.
+
+type TableRow<T extends keyof Database['public']['Tables']> =
+  Database['public']['Tables'][T]['Row']
+
+function toShow(row: TableRow<'shows'>): Show {
+  return { ...row, status: row.status as ShowStatus }
+}
+
+function toMovie(row: TableRow<'movies'>): Movie {
+  return { ...row, status: row.status as MovieStatus }
+}
+
+function toUpcoming(
+  row: Database['public']['Functions']['upcoming']['Returns'][number],
+): UpcomingRow {
+  return { ...row, kind: row.kind as UpcomingRow['kind'] }
+}
+
 // -------------------------------------------------------------- reads ---
 
 export async function getUpNext(): Promise<UpNextRow[]> {
@@ -46,7 +80,7 @@ export async function getUpNext(): Promise<UpNextRow[]> {
 }
 
 export async function getUpcoming(days = 30): Promise<UpcomingRow[]> {
-  return unwrap(await supabase.rpc('upcoming', { days })) ?? []
+  return (unwrap(await supabase.rpc('upcoming', { days })) ?? []).map(toUpcoming)
 }
 
 export async function getStats(): Promise<MonthStat[]> {
@@ -56,19 +90,19 @@ export async function getStats(): Promise<MonthStat[]> {
 export async function getShows(status?: ShowStatus | ShowStatus[]): Promise<Show[]> {
   let query = supabase.from('shows').select('*').order('title')
   if (status) query = Array.isArray(status) ? query.in('status', status) : query.eq('status', status)
-  return unwrap(await query) ?? []
+  return (unwrap(await query) ?? []).map(toShow)
 }
 
 export async function getShow(showId: number): Promise<Show | null> {
   const { data, error } = await supabase.from('shows').select('*').eq('id', showId).maybeSingle()
   if (error) throw new Error(error.message)
-  return data
+  return data ? toShow(data) : null
 }
 
 export async function getMovies(status?: MovieStatus): Promise<Movie[]> {
   let query = supabase.from('movies').select('*').order('title')
   if (status) query = query.eq('status', status)
-  return unwrap(await query) ?? []
+  return (unwrap(await query) ?? []).map(toMovie)
 }
 
 export async function getCachedEpisodes(showId: number): Promise<CachedEpisode[]> {
@@ -149,15 +183,17 @@ export async function getWatchProviders(
     )
 
     for (const row of rows ?? []) {
-      found.set(row.tmdb_id as number, {
-        tmdb_id: row.tmdb_id as number,
+      found.set(row.tmdb_id, {
+        tmdb_id: row.tmdb_id,
         kind,
         region,
-        link: (row.link as string | null) ?? null,
+        link: row.link,
         // Hydrated, not re-normalised: the stored payload is already in our
-        // own shape. This only guarantees all four buckets exist.
+        // own shape. This only guarantees all four buckets exist. `providers`
+        // is a jsonb column, so it arrives as Json and the shape inside it is
+        // still ours to check -- generated types stop at the column boundary.
         providers: hydrateProviders(row.providers),
-        refreshed_at: row.refreshed_at as string,
+        refreshed_at: row.refreshed_at,
       })
     }
   }
@@ -174,12 +210,14 @@ export async function getUserSettings(): Promise<WatchSettings> {
   if (error) throw new Error(error.message)
   if (!data) return DEFAULT_WATCH_SETTINGS
 
-  const region = typeof data.watch_region === 'string' ? data.watch_region : ''
+  // watch_region is CHECK-constrained to two uppercase letters, but a CHECK is
+  // invisible to the generated types and this value drives a cache key, so it
+  // is still validated rather than trusted.
   return {
-    watch_region: isValidRegion(region) ? region : DEFAULT_WATCH_SETTINGS.watch_region,
-    subscribed_providers: Array.isArray(data.subscribed_providers)
-      ? (data.subscribed_providers as number[])
-      : [],
+    watch_region: isValidRegion(data.watch_region)
+      ? data.watch_region
+      : DEFAULT_WATCH_SETTINGS.watch_region,
+    subscribed_providers: data.subscribed_providers,
   }
 }
 
@@ -237,7 +275,7 @@ export async function addShow(tmdbId: number, status: ShowStatus): Promise<Show>
     .select()
     .single()
   if (error) throw new Error(error.message)
-  return data as Show
+  return toShow(data)
 }
 
 export async function setShowStatus(showId: number, status: ShowStatus): Promise<void> {
@@ -347,7 +385,7 @@ export async function addMovie(tmdbId: number, status: MovieStatus): Promise<Mov
     .select()
     .single()
   if (error) throw new Error(error.message)
-  return data as Movie
+  return toMovie(data)
 }
 
 export async function setMovieWatched(

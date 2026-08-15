@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import type { Database } from './database.types'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -9,7 +10,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Typed against the live schema. database.types.ts is generated -- regenerate
+// it after any migration with:
+//   npx.cmd supabase gen types typescript --linked | Out-File -FilePath src\lib\database.types.ts -Encoding utf8
+// (piped, not `>`: PowerShell's redirect writes UTF-16 and would corrupt it.)
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
 
 /**
  * Authenticated fetch against our own /api routes. Refreshes the session when
