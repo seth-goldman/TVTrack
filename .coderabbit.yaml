@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# WHY: CodeRabbit Fair Usage is per developer identity, rolling 7 days, across EVERY repo
+# on the account — not per repo. This repo's default-on per-push re-reviews (verified: no
+# .coderabbit.yaml existed before this file, so auto_incremental_review defaulted to true)
+# were silently consuming the shared allowance and contributed to throttling dealflow-ai's
+# own review pipeline. See dealflow-ai's docs/prds/review-throttle-root-cause.md, backlog
+# item 184, Phase 1 — seth-goldman/dealflow-ai#479 (measured: PR #1 in this repo produced
+# 4 review iterations in 27 minutes off 4 commits — the auto-review-on-push signature).
+#
+# One automatic review per PR on open; NO re-review on every subsequent push. Re-review
+# after a fix is still available on demand with a plain `@coderabbitai review` comment.
+language: en-US
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    auto_incremental_review: false   # the budget-killer: default true = re-review on every push
+    auto_pause_after_reviewed_commits: 2   # belt-and-braces cap; default is 5
+    drafts: false
+  path_filters:
+    - "!package-lock.json"
