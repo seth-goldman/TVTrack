@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/user/TVTrack status)",
+      "Bash(git -C /home/user/TVTrack log *)",
+      "Bash(git -C /home/user/TVTrack branch *)",
+      "Bash(git -C /home/user/TVTrack rev-parse *)",
+      "Bash(git -C /home/user/TVTrack merge-base *)",
+      "Bash(git -C /home/user/TVTrack fetch origin)",
+      "Bash(git -C /home/user/TVTrack fetch --prune origin)",
+      "Bash(git -C /home/user/TVTrack diff --stat origin/main...HEAD)",
+      "Bash(git -C /home/user/TVTrack diff --name-only origin/main...HEAD)",
+      "Bash(git -C /home/user/TVTrack diff origin/main...HEAD)",
+      "Bash(git -C C:/Projects/TVTrack status)",
+      "Bash(git -C C:/Projects/TVTrack log *)",
+      "Bash(git -C C:/Projects/TVTrack branch *)",
+      "Bash(git -C C:/Projects/TVTrack rev-parse *)",
+      "Bash(git -C C:/Projects/TVTrack merge-base *)",
+      "Bash(git -C C:/Projects/TVTrack fetch origin)",
+      "Bash(git -C C:/Projects/TVTrack fetch --prune origin)",
+      "Bash(git -C C:/Projects/TVTrack diff --stat origin/main...HEAD)",
+      "Bash(git -C C:/Projects/TVTrack diff --name-only origin/main...HEAD)",
+      "Bash(git -C C:/Projects/TVTrack diff origin/main...HEAD)",
+      "mcp__github__pull_request_read",
+      "mcp__github__get_file_contents",
+      "mcp__github__list_pull_requests",
+      "mcp__Claude_Code_Remote__list_triggers"
+    ]
+  }
+}
